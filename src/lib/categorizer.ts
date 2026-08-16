@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { RuleSource } from "@/generated/prisma";
+import { RuleSource } from "@/generated/prisma/enums";
 
 interface CategorizationResult {
   categoryId: string;

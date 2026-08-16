@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { RuleSource } from "@/generated/prisma";
+import { RuleSource } from "@/generated/prisma/enums";
 
 const LEGAL_SUFFIXES = [
   /\s*(?:pvt\.?\s*)?ltd\.?$/i,

@@ -1,4 +1,4 @@
-import { TransactionType, PaymentMethod } from "@/generated/prisma";
+import { TransactionType, PaymentMethod } from "@/generated/prisma/enums";
 
 export interface ExtractedAmount {
   amount: number;

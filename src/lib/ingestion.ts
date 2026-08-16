@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { SyncStatus, CandidateStatus, TransactionType } from "@/generated/prisma";
+import { SyncStatus, CandidateStatus, TransactionType } from "@/generated/prisma/enums";
 import {
   getGmailClient,
   searchFinancialEmails,
