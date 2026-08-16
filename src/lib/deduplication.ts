@@ -1,4 +1,4 @@
-import prisma from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
 import type { TransactionCandidateData } from "@/lib/parser";
 import { normalizeMerchantName } from "@/lib/merchant-normalizer";
 
