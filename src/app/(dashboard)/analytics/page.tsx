@@ -229,7 +229,7 @@ export default function AnalyticsPage() {
                     <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
                     <XAxis dataKey="month" fontSize={12} />
                     <YAxis fontSize={12} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                    <Tooltip formatter={(v: unknown) => formatCurrency(Number(v))} />
                     <Line
                       type="monotone"
                       dataKey="amount"
@@ -256,7 +256,7 @@ export default function AnalyticsPage() {
                       <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
                       <XAxis dataKey="month" fontSize={12} />
                       <YAxis fontSize={12} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-                      <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                      <Tooltip formatter={(v: unknown) => formatCurrency(Number(v))} />
                       <Legend />
                       <Bar dataKey="income" fill="hsl(142, 76%, 36%)" radius={[4, 4, 0, 0]} name="Income" />
                       <Bar dataKey="expense" fill="hsl(346, 87%, 43%)" radius={[4, 4, 0, 0]} name="Expenses" />
@@ -277,7 +277,7 @@ export default function AnalyticsPage() {
                       <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
                       <XAxis dataKey="month" fontSize={12} />
                       <YAxis fontSize={12} tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
-                      <Tooltip formatter={(v: number) => `${v}%`} />
+                      <Tooltip formatter={(v: unknown) => `${v}%`} />
                       <Area
                         type="monotone"
                         dataKey="rate"
@@ -319,7 +319,7 @@ export default function AnalyticsPage() {
                           <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                      <Tooltip formatter={(v: unknown) => formatCurrency(Number(v))} />
                       <Legend />
                     </PieChart>
                   </ResponsiveContainer>
@@ -382,7 +382,7 @@ export default function AnalyticsPage() {
                     <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
                     <XAxis dataKey="month" fontSize={12} tickFormatter={(v) => v.split(" ")[0]} />
                     <YAxis fontSize={12} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                    <Tooltip formatter={(v: unknown) => formatCurrency(Number(v))} />
                     <Legend />
                     <Bar dataKey="income" fill="hsl(142, 76%, 36%)" radius={[4, 4, 0, 0]} name="Income" />
                     <Bar dataKey="spent" fill="hsl(346, 87%, 43%)" radius={[4, 4, 0, 0]} name="Spent" />
@@ -496,7 +496,7 @@ export default function AnalyticsPage() {
                           <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                      <Tooltip formatter={(v: unknown) => formatCurrency(Number(v))} />
                       <Legend />
                     </PieChart>
                   </ResponsiveContainer>

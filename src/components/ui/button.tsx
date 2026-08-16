@@ -34,15 +34,15 @@ function Slot({
   children,
   ...props
 }: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) {
-  if (React.isValidElement(children)) {
+  if (React.isValidElement<Record<string, unknown>>(children)) {
     return React.cloneElement(children, {
       ...props,
-      ...(children.props as Record<string, unknown>),
+      ...children.props,
       className: cn(
-        (props as Record<string, unknown>).className,
-        (children.props as Record<string, unknown>).className
+        props.className as string,
+        children.props.className as string
       ),
-    });
+    } as React.Attributes & Record<string, unknown>);
   }
   return <span {...props}>{children}</span>;
 }
