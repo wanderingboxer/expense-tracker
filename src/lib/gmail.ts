@@ -71,7 +71,7 @@ export function getUpdatedAccessToken(
 }
 
 export function buildFinancialSearchQuery(afterDays?: number): string {
-  const query = "from:hdfcbank.net (credited OR debited OR transaction OR payment OR transfer OR UPI OR NEFT OR IMPS OR ATM OR EMI OR autopay)";
+  const query = "from:alerts@hdfcbank.net";
   if (afterDays) {
     const d = new Date();
     d.setDate(d.getDate() - afterDays);
