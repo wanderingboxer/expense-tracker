@@ -136,8 +136,13 @@ export function calculateRelevanceScore(email: EmailForScoring): number {
     score += 15;
   }
 
-  // Negative signals: -20
-  if (NEGATIVE_KEYWORDS.some((kw) => combined.includes(kw))) {
+  // Negative signals: -20 (check subject only for "unsubscribe" since it commonly appears in legitimate email footers)
+  if (NEGATIVE_KEYWORDS.some((kw) => {
+    if (kw === "unsubscribe") {
+      return subject.includes(kw);
+    }
+    return combined.includes(kw);
+  })) {
     score -= 20;
   }
 

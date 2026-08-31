@@ -3,7 +3,7 @@ import type { TransactionCandidateData } from "@/lib/parser";
 import { normalizeMerchantName } from "@/lib/merchant-normalizer";
 
 export const AUTO_MERGE_THRESHOLD = 90;
-export const REVIEW_THRESHOLD = 70;
+export const REVIEW_THRESHOLD = 55;
 
 export interface MatchResult {
   score: number;

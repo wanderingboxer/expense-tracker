@@ -36,10 +36,38 @@ function extractBody(
   return "";
 }
 
-export function getGmailClient(accessToken: string): gmail_v1.Gmail {
-  const auth = new google.auth.OAuth2();
-  auth.setCredentials({ access_token: accessToken });
-  return google.gmail({ version: "v1", auth });
+export interface GmailClientResult {
+  gmail: gmail_v1.Gmail;
+  auth: InstanceType<typeof google.auth.OAuth2>;
+}
+
+/**
+ * Creates a Gmail client with proper OAuth2 credentials for automatic token refresh.
+ * After using the client, call `getUpdatedAccessToken` to check if the token was refreshed.
+ */
+export function getGmailClient(
+  accessToken: string,
+  refreshToken: string
+): GmailClientResult {
+  const auth = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+  auth.setCredentials({
+    access_token: accessToken,
+    refresh_token: refreshToken,
+  });
+  return { gmail: google.gmail({ version: "v1", auth }), auth };
+}
+
+/**
+ * Returns the current access token from the OAuth2 client.
+ * If a refresh occurred, this will differ from the original token.
+ */
+export function getUpdatedAccessToken(
+  auth: InstanceType<typeof google.auth.OAuth2>
+): string | null {
+  return auth.credentials.access_token ?? null;
 }
 
 export function buildFinancialSearchQuery(): string {

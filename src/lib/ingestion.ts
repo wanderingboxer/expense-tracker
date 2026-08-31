@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { SyncStatus, CandidateStatus, TransactionType } from "@/generated/prisma/enums";
 import {
   getGmailClient,
+  getUpdatedAccessToken,
   searchFinancialEmails,
   getMessage,
   getHistoryChanges,
@@ -54,7 +55,7 @@ export async function processGmailImport(
   });
 
   try {
-    const gmail = getGmailClient(connection.accessToken);
+    const { gmail, auth } = getGmailClient(connection.accessToken, connection.refreshToken);
     let pageToken: string | undefined;
 
     do {
@@ -92,6 +93,12 @@ export async function processGmailImport(
     // Get current profile for historyId
     const profile = await gmail.users.getProfile({ userId: "me" });
 
+    // Persist refreshed access token if it changed
+    const updatedToken = getUpdatedAccessToken(auth);
+    const tokenUpdate = updatedToken && updatedToken !== connection.accessToken
+      ? { accessToken: updatedToken }
+      : {};
+
     await prisma.gmailConnection.update({
       where: { id: connection.id },
       data: {
@@ -100,6 +107,7 @@ export async function processGmailImport(
         historyId: profile.data.historyId
           ? BigInt(profile.data.historyId)
           : undefined,
+        ...tokenUpdate,
       },
     });
   } catch (error) {
@@ -147,7 +155,7 @@ export async function processIncrementalSync(
   });
 
   try {
-    const gmail = getGmailClient(connection.accessToken);
+    const { gmail, auth } = getGmailClient(connection.accessToken, connection.refreshToken);
     const { addedMessageIds } = await getHistoryChanges(
       gmail,
       connection.historyId.toString()
