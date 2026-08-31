@@ -5,6 +5,7 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const isAuthRoute = pathname.startsWith("/api/auth");
+  const isSetupRoute = pathname === "/api/setup";
   const isLoginPage = pathname === "/login";
   const isPublicAsset =
     pathname.startsWith("/_next") ||
@@ -12,7 +13,7 @@ export function middleware(request: NextRequest) {
     pathname === "/sitemap.xml" ||
     pathname === "/robots.txt";
 
-  if (isAuthRoute || isLoginPage || isPublicAsset) {
+  if (isAuthRoute || isSetupRoute || isLoginPage || isPublicAsset) {
     return NextResponse.next();
   }
 
