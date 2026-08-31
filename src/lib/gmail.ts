@@ -71,7 +71,7 @@ export function getUpdatedAccessToken(
 }
 
 export function buildFinancialSearchQuery(afterDays?: number): string {
-  const query = "from:alerts@hdfcbank.net";
+  const query = "from:alerts@hdfcbank.bank.in";
   if (afterDays) {
     const d = new Date();
     d.setDate(d.getDate() - afterDays);
