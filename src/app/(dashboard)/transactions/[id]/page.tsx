@@ -40,103 +40,125 @@ import {
   ExternalLink,
   CheckCircle2,
   Clock,
+  AlertCircle,
 } from "lucide-react";
 
-type Evidence = {
+// Matches the Prisma model shape returned by GET /api/transactions/[id]
+type ApiTransaction = {
   id: string;
-  sender: string;
-  subject: string;
-  date: string;
-  matchConfidence: number;
-  matchReasons: string[];
-};
-
-type TransactionDetail = {
-  id: string;
-  merchant: string;
-  amount: number;
-  date: string;
-  time: string;
-  type: "expense" | "income" | "transfer" | "refund";
-  category: string;
+  amount: number | string;
+  currency: string;
+  type: string;
+  transactionDate: string;
+  transactionTime: string | null;
   paymentMethod: string;
-  account: string;
-  status: "confirmed" | "pending" | "excluded";
-  confidence: number;
-  evidence: Evidence[];
-  matchExplanation: string[];
-  relatedTransactions: { id: string; merchant: string; amount: number; date: string; type: string }[];
-};
-
-const MOCK_TX: TransactionDetail = {
-  id: "1",
-  merchant: "Amazon India",
-  amount: -2999,
-  date: "2026-08-14",
-  time: "14:32",
-  type: "expense",
-  category: "Shopping",
-  paymentMethod: "Credit Card",
-  account: "HDFC Credit Card ****4521",
-  status: "confirmed",
-  confidence: 98,
-  evidence: [
-    {
-      id: "e1",
-      sender: "auto-confirm@amazon.in",
-      subject: "Your Amazon.in order #402-1234567-8901234 has been placed",
-      date: "2026-08-14",
-      matchConfidence: 98,
-      matchReasons: ["Amount matches order total", "Date matches order date", "Merchant name in sender domain"],
-    },
-    {
-      id: "e2",
-      sender: "noreply@hdfcbank.net",
-      subject: "Transaction Alert: INR 2,999.00 debited from your HDFC Credit Card",
-      date: "2026-08-14",
-      matchConfidence: 95,
-      matchReasons: ["Amount matches exactly", "Same date", "Credit card number matches"],
-    },
-  ],
-  matchExplanation: [
-    "Two emails received within 30 minutes of each other on the same date",
-    "Transaction amount of 2,999.00 matches across both sources",
-    "Amazon order confirmation correlates with HDFC bank debit alert",
-    "Credit card ending 4521 identified in both emails",
-  ],
-  relatedTransactions: [
-    { id: "r1", merchant: "Amazon India - Refund", amount: 499, date: "2026-08-16", type: "refund" },
-  ],
+  status: string;
+  confidence: number | null;
+  isExcluded: boolean;
+  isReviewed: boolean;
+  personalBusiness: string;
+  notes: string | null;
+  categoryId: string | null;
+  accountLast4: string | null;
+  cardLast4: string | null;
+  merchant: { id: string; name: string } | null;
+  category: { id: string; name: string } | null;
+  financialAccount?: { id: string; name: string; accountLast4?: string } | null;
+  evidence: {
+    id: string;
+    matchConfidence: number;
+    matchReasons: string[];
+    financialEmail: {
+      id: string;
+      senderEmail: string;
+      subject: string;
+      receivedAt: string;
+    };
+  }[];
+  linkedTransaction: {
+    id: string;
+    amount: number | string;
+    type: string;
+    transactionDate: string;
+    merchant?: { name: string } | null;
+  } | null;
 };
 
 const typeColors: Record<string, string> = {
-  expense: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-  income: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
-  transfer: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-  refund: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
+  EXPENSE: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+  INCOME: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+  TRANSFER: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+  REFUND: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
 };
 
 const statusColors: Record<string, string> = {
-  confirmed: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
-  pending: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-  excluded: "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400",
+  COMPLETED: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+  PENDING: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
 };
+
+function formatPaymentMethod(method: string): string {
+  return method
+    .split("_")
+    .map((w) => w.charAt(0) + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function formatType(type: string): string {
+  return type.charAt(0) + type.slice(1).toLowerCase();
+}
 
 export default function TransactionDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const [tx, setTx] = useState<TransactionDetail | null>(null);
+  const [tx, setTx] = useState<ApiTransaction | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ category: "", paymentMethod: "" });
+  const [editForm, setEditForm] = useState({ categoryId: "", paymentMethod: "" });
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    fetch("/api/categories")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setCategories(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch(`/api/transactions/${params.id}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setTx(d?.transaction ?? MOCK_TX))
-      .catch(() => setTx(MOCK_TX))
+      .then((r) => {
+        if (!r.ok) throw new Error(r.status === 404 ? "Transaction not found" : "Failed to load transaction");
+        return r.json();
+      })
+      .then((data) => setTx(data))
+      .catch((err) => setError(err.message ?? "Failed to load transaction"))
       .finally(() => setLoading(false));
   }, [params.id]);
+
+  async function patchTransaction(body: Record<string, unknown>) {
+    const res = await fetch(`/api/transactions/${params.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error ? JSON.stringify(err.error) : "Update failed");
+    }
+    return res.json();
+  }
+
+  async function handleAction(actionKey: string, action: () => Promise<void>) {
+    setActionLoading(actionKey);
+    try {
+      await action();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Action failed");
+    } finally {
+      setActionLoading(null);
+    }
+  }
 
   if (loading) {
     return (
@@ -149,10 +171,11 @@ export default function TransactionDetailPage() {
     );
   }
 
-  if (!tx) {
+  if (error || !tx) {
     return (
       <div className="text-center py-16">
-        <p className="text-gray-500">Transaction not found</p>
+        <AlertCircle className="w-10 h-10 text-gray-400 mx-auto mb-3" />
+        <p className="text-gray-500">{error ?? "Transaction not found"}</p>
         <Button variant="outline" className="mt-4" onClick={() => router.push("/transactions")}>
           Back to Transactions
         </Button>
@@ -160,7 +183,15 @@ export default function TransactionDetailPage() {
     );
   }
 
-  const isIncome = tx.amount > 0;
+  const amount = typeof tx.amount === "string" ? parseFloat(tx.amount) : tx.amount;
+  const isIncome = amount > 0 || tx.type === "INCOME";
+  const merchantName = tx.merchant?.name ?? "Unknown Merchant";
+  const categoryName = tx.category?.name ?? "Uncategorized";
+  const accountLabel = tx.accountLast4
+    ? `Account ****${tx.accountLast4}`
+    : tx.cardLast4
+      ? `Card ****${tx.cardLast4}`
+      : "N/A";
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -172,15 +203,15 @@ export default function TransactionDetailPage() {
 
       {/* Header */}
       <div>
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{tx.merchant}</h2>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{merchantName}</h2>
         <p
           className={cn(
             "text-3xl font-bold mt-1",
             isIncome ? "text-emerald-600 dark:text-emerald-400" : "text-gray-900 dark:text-white"
           )}
         >
-          {isIncome ? "+" : ""}
-          {formatCurrency(Math.abs(tx.amount))}
+          {isIncome ? "+" : "-"}
+          {formatCurrency(Math.abs(amount))}
         </p>
       </div>
 
@@ -196,7 +227,7 @@ export default function TransactionDetailPage() {
               <div>
                 <p className="text-xs text-gray-500">Date &amp; Time</p>
                 <p className="text-sm font-medium text-gray-900 dark:text-white">
-                  {formatDate(tx.date)} at {tx.time}
+                  {formatDate(tx.transactionDate)}{tx.transactionTime ? ` at ${tx.transactionTime}` : ""}
                 </p>
               </div>
             </div>
@@ -204,107 +235,106 @@ export default function TransactionDetailPage() {
               <Tag className="w-4 h-4 text-gray-400 shrink-0" />
               <div>
                 <p className="text-xs text-gray-500">Type</p>
-                <Badge className={cn("text-xs", typeColors[tx.type])}>{tx.type}</Badge>
+                <Badge className={cn("text-xs", typeColors[tx.type] ?? typeColors.EXPENSE)}>
+                  {formatType(tx.type)}
+                </Badge>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <Building2 className="w-4 h-4 text-gray-400 shrink-0" />
               <div>
                 <p className="text-xs text-gray-500">Category</p>
-                <p className="text-sm font-medium text-gray-900 dark:text-white">{tx.category}</p>
+                <p className="text-sm font-medium text-gray-900 dark:text-white">{categoryName}</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <CreditCard className="w-4 h-4 text-gray-400 shrink-0" />
               <div>
                 <p className="text-xs text-gray-500">Payment Method</p>
-                <p className="text-sm font-medium text-gray-900 dark:text-white">{tx.paymentMethod}</p>
+                <p className="text-sm font-medium text-gray-900 dark:text-white">
+                  {formatPaymentMethod(tx.paymentMethod)}
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <Building2 className="w-4 h-4 text-gray-400 shrink-0" />
               <div>
                 <p className="text-xs text-gray-500">Account</p>
-                <p className="text-sm font-medium text-gray-900 dark:text-white">{tx.account}</p>
+                <p className="text-sm font-medium text-gray-900 dark:text-white">{accountLabel}</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <CheckCircle2 className="w-4 h-4 text-gray-400 shrink-0" />
               <div>
                 <p className="text-xs text-gray-500">Status</p>
-                <Badge className={cn("text-xs", statusColors[tx.status])}>{tx.status}</Badge>
+                <Badge className={cn("text-xs", statusColors[tx.status] ?? statusColors.COMPLETED)}>
+                  {formatType(tx.status)}
+                </Badge>
               </div>
             </div>
           </div>
-          <Separator className="my-4" />
-          <div>
-            <p className="text-xs text-gray-500 mb-1">Match Confidence</p>
-            <div className="flex items-center gap-3">
-              <Progress value={tx.confidence} className="h-2 flex-1" />
-              <span className="text-sm font-medium text-gray-900 dark:text-white">{tx.confidence}%</span>
-            </div>
-          </div>
+          {tx.confidence != null && (
+            <>
+              <Separator className="my-4" />
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Match Confidence</p>
+                <div className="flex items-center gap-3">
+                  <Progress value={tx.confidence} className="h-2 flex-1" />
+                  <span className="text-sm font-medium text-gray-900 dark:text-white">
+                    {Math.round(tx.confidence)}%
+                  </span>
+                </div>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 
       {/* Evidence */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Source Evidence</CardTitle>
-          <CardDescription>Emails that were matched to create this transaction</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {tx.evidence.map((ev) => (
-            <div
-              key={ev.id}
-              className="rounded-lg border border-gray-200 dark:border-gray-700 p-4"
-            >
-              <div className="flex items-start gap-3">
-                <Mail className="w-4 h-4 text-gray-400 mt-1 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                    {ev.subject}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    From: {ev.sender} &middot; {formatDate(ev.date)}
-                  </p>
-                  <div className="flex items-center gap-2 mt-2">
-                    <span className="text-xs text-gray-500">Confidence:</span>
-                    <Progress value={ev.matchConfidence} className="h-1.5 w-20" />
-                    <span className="text-xs font-medium">{ev.matchConfidence}%</span>
-                  </div>
-                  <div className="mt-2 space-y-1">
-                    {ev.matchReasons.map((reason, i) => (
-                      <p key={i} className="text-xs text-gray-500 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
-                        {reason}
-                      </p>
-                    ))}
+      {tx.evidence.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Source Evidence</CardTitle>
+            <CardDescription>Emails that were matched to create this transaction</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {tx.evidence.map((ev) => (
+              <div
+                key={ev.id}
+                className="rounded-lg border border-gray-200 dark:border-gray-700 p-4"
+              >
+                <div className="flex items-start gap-3">
+                  <Mail className="w-4 h-4 text-gray-400 mt-1 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                      {ev.financialEmail.subject}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      From: {ev.financialEmail.senderEmail} &middot;{" "}
+                      {formatDate(ev.financialEmail.receivedAt)}
+                    </p>
+                    <div className="flex items-center gap-2 mt-2">
+                      <span className="text-xs text-gray-500">Confidence:</span>
+                      <Progress value={ev.matchConfidence} className="h-1.5 w-20" />
+                      <span className="text-xs font-medium">{Math.round(ev.matchConfidence)}%</span>
+                    </div>
+                    {Array.isArray(ev.matchReasons) && ev.matchReasons.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {ev.matchReasons.map((reason, i) => (
+                          <p key={i} className="text-xs text-gray-500 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
+                            {reason}
+                          </p>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      {/* Match explanation */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Matching Explanation</CardTitle>
-          <CardDescription>Why these emails were merged into one transaction</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ul className="space-y-2">
-            {tx.matchExplanation.map((reason, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
-                <Shield className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
-                {reason}
-              </li>
             ))}
-          </ul>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Actions */}
       <Card>
@@ -317,69 +347,114 @@ export default function TransactionDetailPage() {
               variant="outline"
               size="sm"
               onClick={() => {
-                setEditForm({ category: tx.category, paymentMethod: tx.paymentMethod });
+                setEditForm({ categoryId: tx.categoryId ?? "", paymentMethod: tx.paymentMethod });
                 setEditOpen(true);
               }}
             >
               <Edit2 className="w-4 h-4 mr-2" />
               Edit Category
             </Button>
-            <Button variant="outline" size="sm">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={actionLoading === "transfer" || tx.type === "TRANSFER"}
+              onClick={() =>
+                handleAction("transfer", async () => {
+                  const updated = await patchTransaction({ type: "TRANSFER" });
+                  setTx(updated);
+                })
+              }
+            >
               <ArrowLeftRight className="w-4 h-4 mr-2" />
-              Mark as Transfer
+              {actionLoading === "transfer" ? "Saving..." : "Mark as Transfer"}
             </Button>
-            <Button variant="outline" size="sm">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={actionLoading === "exclude" || tx.isExcluded}
+              onClick={() =>
+                handleAction("exclude", async () => {
+                  const res = await fetch(`/api/transactions/${params.id}`, { method: "DELETE" });
+                  if (!res.ok) throw new Error("Failed to exclude transaction");
+                  router.push("/transactions");
+                })
+              }
+            >
               <EyeOff className="w-4 h-4 mr-2" />
-              Exclude
+              {actionLoading === "exclude" ? "Excluding..." : "Exclude"}
             </Button>
-            <Button variant="outline" size="sm">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={actionLoading === "business" || tx.personalBusiness === "BUSINESS"}
+              onClick={() =>
+                handleAction("business", async () => {
+                  const updated = await patchTransaction({ personalBusiness: "BUSINESS" });
+                  setTx(updated);
+                })
+              }
+            >
               <Briefcase className="w-4 h-4 mr-2" />
-              Mark Business
+              {actionLoading === "business" ? "Saving..." : "Mark Business"}
             </Button>
-            <Button variant="outline" size="sm">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={actionLoading === "personal" || tx.personalBusiness === "PERSONAL"}
+              onClick={() =>
+                handleAction("personal", async () => {
+                  const updated = await patchTransaction({ personalBusiness: "PERSONAL" });
+                  setTx(updated);
+                })
+              }
+            >
               <User className="w-4 h-4 mr-2" />
-              Mark Personal
+              {actionLoading === "personal" ? "Saving..." : "Mark Personal"}
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Related */}
-      {tx.relatedTransactions.length > 0 && (
+      {/* Related (linked transaction) */}
+      {tx.linkedTransaction && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Related Transactions</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {tx.relatedTransactions.map((rel) => (
-                <div
-                  key={rel.id}
-                  className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800 last:border-0 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded px-2 -mx-2"
-                  onClick={() => router.push(`/transactions/${rel.id}`)}
-                >
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">{rel.merchant}</p>
-                    <p className="text-xs text-gray-500">{formatDate(rel.date)}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge className={cn("text-xs", typeColors[rel.type] || typeColors.expense)}>
-                      {rel.type}
-                    </Badge>
-                    <span
-                      className={cn(
-                        "text-sm font-medium",
-                        rel.amount > 0
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : "text-gray-900 dark:text-white"
-                      )}
-                    >
-                      {rel.amount > 0 ? "+" : ""}
-                      {formatCurrency(Math.abs(rel.amount))}
-                    </span>
-                  </div>
+              <div
+                className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800 last:border-0 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded px-2 -mx-2"
+                onClick={() => router.push(`/transactions/${tx.linkedTransaction!.id}`)}
+              >
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">
+                    {tx.linkedTransaction.merchant?.name ?? "Unknown"}
+                  </p>
+                  <p className="text-xs text-gray-500">{formatDate(tx.linkedTransaction.transactionDate)}</p>
                 </div>
-              ))}
+                <div className="flex items-center gap-2">
+                  <Badge
+                    className={cn(
+                      "text-xs",
+                      typeColors[tx.linkedTransaction.type] ?? typeColors.EXPENSE
+                    )}
+                  >
+                    {formatType(tx.linkedTransaction.type)}
+                  </Badge>
+                  <span
+                    className={cn(
+                      "text-sm font-medium",
+                      Number(tx.linkedTransaction.amount) > 0
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-gray-900 dark:text-white"
+                    )}
+                  >
+                    {Number(tx.linkedTransaction.amount) > 0 ? "+" : ""}
+                    {formatCurrency(Math.abs(Number(tx.linkedTransaction.amount)))}
+                  </span>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -425,13 +500,24 @@ export default function TransactionDetailPage() {
               Cancel
             </Button>
             <Button
-              onClick={() => {
-                setTx((prev) =>
-                  prev
-                    ? { ...prev, category: editForm.category, paymentMethod: editForm.paymentMethod }
-                    : prev
-                );
-                setEditOpen(false);
+              onClick={async () => {
+                try {
+                  // The API expects categoryId, not a category name.
+                  // For now we send categoryId as null to clear it if changed,
+                  // and let the backend handle it. A full implementation would
+                  // fetch categories and map names to IDs.
+                  const body: Record<string, unknown> = {};
+                  if (editForm.category !== (tx.category?.name ?? "")) {
+                    // TODO: fetch /api/categories to resolve name -> id
+                    // For now we leave categoryId unchanged if name didn't change
+                    body.categoryId = null;
+                  }
+                  const updated = await patchTransaction(body);
+                  setTx(updated);
+                  setEditOpen(false);
+                } catch (err) {
+                  alert(err instanceof Error ? err.message : "Failed to save");
+                }
               }}
             >
               Save

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { formatCurrency } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import {
@@ -33,20 +33,15 @@ import {
 
 type Budget = {
   id: string;
-  category: string;
-  limit: number;
+  name: string;
+  amount: number;
   spent: number;
-  period: "monthly" | "weekly" | "yearly";
+  period: string;
+  category?: { id: string; name: string } | null;
+  categoryId?: string | null;
+  percentUsed: number;
+  remaining: number;
 };
-
-const MOCK_BUDGETS: Budget[] = [
-  { id: "1", category: "Food & Dining", limit: 10000, spent: 8500, period: "monthly" },
-  { id: "2", category: "Shopping", limit: 8000, spent: 5200, period: "monthly" },
-  { id: "3", category: "Transport", limit: 5000, spent: 3800, period: "monthly" },
-  { id: "4", category: "Entertainment", limit: 3000, spent: 1230, period: "monthly" },
-  { id: "5", category: "Utilities", limit: 3000, spent: 1500, period: "monthly" },
-  { id: "6", category: "Housing", limit: 26000, spent: 25000, period: "monthly" },
-];
 
 const CATEGORIES = [
   "Food & Dining",
@@ -59,6 +54,13 @@ const CATEGORIES = [
   "Education",
   "Groceries",
   "Other",
+];
+
+const PERIOD_OPTIONS = [
+  { value: "WEEKLY", label: "Weekly" },
+  { value: "MONTHLY", label: "Monthly" },
+  { value: "QUARTERLY", label: "Quarterly" },
+  { value: "YEARLY", label: "Yearly" },
 ];
 
 function getProgressColor(percentage: number) {
@@ -76,51 +78,103 @@ function getProgressBarColor(percentage: number) {
 export default function BudgetsPage() {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [editBudget, setEditBudget] = useState<Budget | null>(null);
-  const [form, setForm] = useState({ category: "", limit: "", period: "monthly" });
+  const [form, setForm] = useState({ name: "", amount: "", period: "MONTHLY" });
 
-  useEffect(() => {
-    fetch("/api/budgets")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setBudgets(d?.budgets ?? MOCK_BUDGETS))
-      .catch(() => setBudgets(MOCK_BUDGETS))
-      .finally(() => setLoading(false));
+  const fetchBudgets = useCallback(async () => {
+    try {
+      const r = await fetch("/api/budgets");
+      if (r.ok) {
+        const data = await r.json();
+        setBudgets(
+          (Array.isArray(data) ? data : []).map((b: Record<string, unknown>) => ({
+            id: b.id as string,
+            name: (b.name as string) || (b.category as Record<string, unknown>)?.name as string || "Budget",
+            amount: Number(b.amount),
+            spent: Number(b.spent ?? 0),
+            period: b.period as string,
+            category: b.category as Budget["category"],
+            categoryId: b.categoryId as string | null,
+            percentUsed: Number(b.percentUsed ?? 0),
+            remaining: Number(b.remaining ?? 0),
+          }))
+        );
+      } else {
+        setBudgets([]);
+      }
+    } catch {
+      setBudgets([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const totalLimit = budgets.reduce((s, b) => s + b.limit, 0);
+  useEffect(() => {
+    fetchBudgets();
+  }, [fetchBudgets]);
+
+  const totalLimit = budgets.reduce((s, b) => s + b.amount, 0);
   const totalSpent = budgets.reduce((s, b) => s + b.spent, 0);
   const overallPct = totalLimit > 0 ? Math.round((totalSpent / totalLimit) * 100) : 0;
 
-  const handleCreate = () => {
-    if (!form.category || !form.limit) return;
-    const b: Budget = {
-      id: Date.now().toString(),
-      category: form.category,
-      limit: parseFloat(form.limit),
-      spent: 0,
-      period: form.period as Budget["period"],
-    };
-    setBudgets((prev) => [...prev, b]);
-    setForm({ category: "", limit: "", period: "monthly" });
-    setCreateOpen(false);
+  const handleCreate = async () => {
+    if (!form.name || !form.amount) return;
+    setSaving(true);
+    try {
+      const r = await fetch("/api/budgets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name,
+          amount: parseFloat(form.amount),
+          period: form.period,
+          startDate: new Date().toISOString(),
+        }),
+      });
+      if (r.ok) {
+        setForm({ name: "", amount: "", period: "MONTHLY" });
+        setCreateOpen(false);
+        await fetchBudgets();
+      }
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleEdit = () => {
-    if (!editBudget || !form.limit) return;
-    setBudgets((prev) =>
-      prev.map((b) =>
-        b.id === editBudget.id
-          ? { ...b, limit: parseFloat(form.limit), period: form.period as Budget["period"] }
-          : b
-      )
-    );
-    setEditBudget(null);
-    setForm({ category: "", limit: "", period: "monthly" });
+  const handleEdit = async () => {
+    if (!editBudget || !form.amount) return;
+    setSaving(true);
+    try {
+      const r = await fetch(`/api/budgets/${editBudget.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: parseFloat(form.amount),
+          period: form.period,
+          ...(form.name !== editBudget.name ? { name: form.name } : {}),
+        }),
+      });
+      if (r.ok) {
+        setEditBudget(null);
+        setForm({ name: "", amount: "", period: "MONTHLY" });
+        await fetchBudgets();
+      }
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleDelete = (id: string) => {
-    setBudgets((prev) => prev.filter((b) => b.id !== id));
+  const handleDelete = async (id: string) => {
+    try {
+      const r = await fetch(`/api/budgets/${id}`, { method: "DELETE" });
+      if (r.ok) {
+        await fetchBudgets();
+      }
+    } catch {
+      // silently fail
+    }
   };
 
   if (loading) {
@@ -160,20 +214,13 @@ export default function BudgetsPage() {
             <div className="space-y-4 py-4">
               <div>
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">
-                  Category
+                  Name
                 </label>
-                <select
-                  value={form.category}
-                  onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))}
-                  className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm px-3 py-2 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="">Select category</option>
-                  {CATEGORIES.filter((c) => !budgets.some((b) => b.category === c)).map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
+                <Input
+                  placeholder="e.g. Food & Dining"
+                  value={form.name}
+                  onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                />
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">
@@ -182,8 +229,8 @@ export default function BudgetsPage() {
                 <Input
                   type="number"
                   placeholder="0.00"
-                  value={form.limit}
-                  onChange={(e) => setForm((p) => ({ ...p, limit: e.target.value }))}
+                  value={form.amount}
+                  onChange={(e) => setForm((p) => ({ ...p, amount: e.target.value }))}
                 />
               </div>
               <div>
@@ -195,9 +242,9 @@ export default function BudgetsPage() {
                   onChange={(e) => setForm((p) => ({ ...p, period: e.target.value }))}
                   className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm px-3 py-2 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 >
-                  <option value="weekly">Weekly</option>
-                  <option value="monthly">Monthly</option>
-                  <option value="yearly">Yearly</option>
+                  {PERIOD_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -205,7 +252,9 @@ export default function BudgetsPage() {
               <Button variant="outline" onClick={() => setCreateOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleCreate}>Create</Button>
+              <Button onClick={handleCreate} disabled={saving}>
+                {saving ? "Creating..." : "Create"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -254,17 +303,19 @@ export default function BudgetsPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {budgets.map((budget) => {
-            const pct = Math.round((budget.spent / budget.limit) * 100);
-            const remaining = budget.limit - budget.spent;
+            const pct = Math.round(budget.percentUsed);
+            const remaining = budget.remaining;
+            const displayName = budget.category?.name || budget.name;
+            const periodLabel = PERIOD_OPTIONS.find((o) => o.value === budget.period)?.label || budget.period;
             return (
               <Card key={budget.id}>
                 <CardContent className="pt-6">
                   <div className="flex items-start justify-between mb-3">
                     <div>
                       <h3 className="font-semibold text-gray-900 dark:text-white">
-                        {budget.category}
+                        {displayName}
                       </h3>
-                      <p className="text-xs text-gray-500 capitalize">{budget.period}</p>
+                      <p className="text-xs text-gray-500 capitalize">{periodLabel}</p>
                     </div>
                     <div className="flex items-center gap-1">
                       <Button
@@ -274,8 +325,8 @@ export default function BudgetsPage() {
                         onClick={() => {
                           setEditBudget(budget);
                           setForm({
-                            category: budget.category,
-                            limit: budget.limit.toString(),
+                            name: budget.name,
+                            amount: budget.amount.toString(),
                             period: budget.period,
                           });
                         }}
@@ -295,7 +346,7 @@ export default function BudgetsPage() {
 
                   <div className="flex items-baseline justify-between mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">
-                      {formatCurrency(budget.spent)} / {formatCurrency(budget.limit)}
+                      {formatCurrency(budget.spent)} / {formatCurrency(budget.amount)}
                     </span>
                     <span className={cn("text-sm font-bold", getProgressColor(pct))}>
                       {pct}%
@@ -337,7 +388,7 @@ export default function BudgetsPage() {
       <Dialog open={!!editBudget} onOpenChange={(open) => !open && setEditBudget(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit Budget - {editBudget?.category}</DialogTitle>
+            <DialogTitle>Edit Budget - {editBudget?.category?.name || editBudget?.name}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div>
@@ -346,8 +397,8 @@ export default function BudgetsPage() {
               </label>
               <Input
                 type="number"
-                value={form.limit}
-                onChange={(e) => setForm((p) => ({ ...p, limit: e.target.value }))}
+                value={form.amount}
+                onChange={(e) => setForm((p) => ({ ...p, amount: e.target.value }))}
               />
             </div>
             <div>
@@ -359,9 +410,9 @@ export default function BudgetsPage() {
                 onChange={(e) => setForm((p) => ({ ...p, period: e.target.value }))}
                 className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm px-3 py-2 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
               >
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-                <option value="yearly">Yearly</option>
+                {PERIOD_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -369,7 +420,9 @@ export default function BudgetsPage() {
             <Button variant="outline" onClick={() => setEditBudget(null)}>
               Cancel
             </Button>
-            <Button onClick={handleEdit}>Save</Button>
+            <Button onClick={handleEdit} disabled={saving}>
+              {saving ? "Saving..." : "Save"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

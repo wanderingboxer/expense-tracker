@@ -184,6 +184,12 @@ export async function processIncrementalSync(
 
     const profile = await gmail.users.getProfile({ userId: "me" });
 
+    // Persist refreshed access token if it changed
+    const updatedToken = getUpdatedAccessToken(auth);
+    const tokenUpdate = updatedToken && updatedToken !== connection.accessToken
+      ? { accessToken: updatedToken }
+      : {};
+
     await prisma.gmailConnection.update({
       where: { id: connection.id },
       data: {
@@ -192,6 +198,7 @@ export async function processIncrementalSync(
         historyId: profile.data.historyId
           ? BigInt(profile.data.historyId)
           : undefined,
+        ...tokenUpdate,
       },
     });
   } catch (error) {
