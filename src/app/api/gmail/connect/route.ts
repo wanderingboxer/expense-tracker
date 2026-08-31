@@ -15,8 +15,23 @@ export async function POST() {
     });
 
     if (!account?.access_token || !account?.refresh_token) {
+      const authUrl = buildGmailAuthUrl();
       return NextResponse.json(
-        { error: "Google account not linked or missing tokens" },
+        { error: "Gmail authorization required", url: authUrl },
+        { status: 400 }
+      );
+    }
+
+    // Test if the token has Gmail scope by trying a simple Gmail API call
+    const testRes = await fetch(
+      "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+      { headers: { Authorization: `Bearer ${account.access_token}` } }
+    );
+
+    if (testRes.status === 403 || testRes.status === 401) {
+      const authUrl = buildGmailAuthUrl();
+      return NextResponse.json(
+        { error: "Gmail scope not granted, re-authorization required", url: authUrl },
         { status: 400 }
       );
     }
@@ -41,4 +56,17 @@ export async function POST() {
     console.error("POST /api/gmail/connect error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
+}
+
+function buildGmailAuthUrl() {
+  const params = new URLSearchParams({
+    client_id: process.env.GOOGLE_CLIENT_ID!,
+    redirect_uri: `${process.env.NEXTAUTH_URL}/api/gmail/callback`,
+    response_type: "code",
+    scope: "openid profile email https://www.googleapis.com/auth/gmail.readonly",
+    access_type: "offline",
+    prompt: "consent",
+    state: "gmail_connect",
+  });
+  return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 }
