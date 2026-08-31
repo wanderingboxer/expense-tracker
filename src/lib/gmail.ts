@@ -70,8 +70,17 @@ export function getUpdatedAccessToken(
   return auth.credentials.access_token ?? null;
 }
 
-export function buildFinancialSearchQuery(): string {
-  return "bank OR payment OR transaction OR receipt OR invoice OR UPI OR credited OR debited OR purchase OR order OR subscription OR refund OR transfer OR statement OR bill OR EMI";
+export function buildFinancialSearchQuery(afterDays?: number): string {
+  const keywords = "bank OR payment OR transaction OR receipt OR invoice OR UPI OR credited OR debited OR purchase OR order OR subscription OR refund OR transfer OR statement OR bill OR EMI";
+  if (afterDays) {
+    const d = new Date();
+    d.setDate(d.getDate() - afterDays);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `(${keywords}) after:${yyyy}/${mm}/${dd}`;
+  }
+  return keywords;
 }
 
 export async function searchFinancialEmails(

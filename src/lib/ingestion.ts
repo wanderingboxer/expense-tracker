@@ -3,6 +3,7 @@ import { SyncStatus, CandidateStatus, TransactionType } from "@/generated/prisma
 import {
   getGmailClient,
   getUpdatedAccessToken,
+  buildFinancialSearchQuery,
   searchFinancialEmails,
   getMessage,
   getHistoryChanges,
@@ -56,19 +57,20 @@ export async function processGmailImport(
 
   try {
     const { gmail, auth } = getGmailClient(connection.accessToken, connection.refreshToken);
+    const MAX_PAGES = 3;
     let pageToken: string | undefined;
+    let pageCount = 0;
 
     do {
       const { messageIds, nextPageToken } = await searchFinancialEmails(
         gmail,
-        undefined,
+        buildFinancialSearchQuery(90),
         pageToken
       );
 
       for (const messageId of messageIds) {
         stats.totalScanned++;
 
-        // Skip already processed emails
         const existing = await prisma.financialEmail.findUnique({
           where: { gmailMessageId: messageId },
         });
@@ -88,7 +90,8 @@ export async function processGmailImport(
       }
 
       pageToken = nextPageToken;
-    } while (pageToken);
+      pageCount++;
+    } while (pageToken && pageCount < MAX_PAGES);
 
     // Get current profile for historyId
     const profile = await gmail.users.getProfile({ userId: "me" });
