@@ -64,7 +64,7 @@ export async function processGmailImport(
     do {
       const { messageIds, nextPageToken } = await searchFinancialEmails(
         gmail,
-        buildFinancialSearchQuery(90),
+        buildFinancialSearchQuery(1),
         pageToken
       );
 
