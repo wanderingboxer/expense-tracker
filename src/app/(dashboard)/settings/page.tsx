@@ -96,6 +96,7 @@ function GmailSection({ email }: { email?: string | null }) {
   const [syncing, setSyncing] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -116,12 +117,17 @@ function GmailSection({ email }: { email?: string | null }) {
   const handleSync = async () => {
     setSyncing(true);
     setError(null);
+    setSyncResult(null);
     try {
       const res = await fetch("/api/gmail/sync", { method: "POST" });
+      const data = await res.json();
       if (!res.ok) {
-        const data = await res.json();
         throw new Error(data.error || "Sync failed");
       }
+      const s = data.stats;
+      setSyncResult(
+        `Scanned ${s.totalScanned} emails, found ${s.financialFound} financial, created ${s.candidatesCreated} transactions, merged ${s.duplicatesMerged} duplicates`
+      );
       await fetchStatus();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Sync failed");
@@ -224,6 +230,9 @@ function GmailSection({ email }: { email?: string | null }) {
 
           {error && (
             <p className="text-sm text-red-500 mb-3">{error}</p>
+          )}
+          {syncResult && (
+            <p className="text-sm text-emerald-500 mb-3">{syncResult}</p>
           )}
 
           <div className="flex flex-wrap gap-3">
