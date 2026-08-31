@@ -71,16 +71,16 @@ export function getUpdatedAccessToken(
 }
 
 export function buildFinancialSearchQuery(afterDays?: number): string {
-  const keywords = "bank OR payment OR transaction OR receipt OR invoice OR UPI OR credited OR debited OR purchase OR order OR subscription OR refund OR transfer OR statement OR bill OR EMI";
+  const query = "from:hdfcbank.net (credited OR debited OR transaction OR payment OR transfer OR UPI OR NEFT OR IMPS OR ATM OR EMI OR autopay)";
   if (afterDays) {
     const d = new Date();
     d.setDate(d.getDate() - afterDays);
     const yyyy = d.getFullYear();
     const mm = String(d.getMonth() + 1).padStart(2, "0");
     const dd = String(d.getDate()).padStart(2, "0");
-    return `(${keywords}) after:${yyyy}/${mm}/${dd}`;
+    return `${query} after:${yyyy}/${mm}/${dd}`;
   }
-  return keywords;
+  return query;
 }
 
 export async function searchFinancialEmails(
