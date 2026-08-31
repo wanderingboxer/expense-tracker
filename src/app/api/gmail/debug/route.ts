@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const session = await auth();
     if (!session?.user?.id) {
@@ -30,6 +30,15 @@ export async function GET() {
     });
     const transactionCount = await prisma.transaction.count({ where: { userId } });
 
+    const emailId = req.nextUrl.searchParams.get("emailId");
+    if (emailId) {
+      const email = await prisma.financialEmail.findFirst({
+        where: { id: emailId, userId },
+        select: { subject: true, bodyText: true, sender: true },
+      });
+      return NextResponse.json(email);
+    }
+
     const recentEmails = await prisma.financialEmail.findMany({
       where: { userId },
       orderBy: { receivedAt: "desc" },
@@ -43,6 +52,7 @@ export async function GET() {
         relevanceScore: true,
         isFinancial: true,
         processedAt: true,
+        bodyText: true,
       },
     });
 
