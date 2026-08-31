@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { neon } from "@neondatabase/serverless";
+import { Client } from "pg";
 
 const MIGRATION_SQL = `
 -- CreateSchema
@@ -444,34 +444,38 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "No database connection string found" }, { status: 500 });
   }
 
-  const sql = neon(connectionString);
-  const exec = (stmt: string) => sql(Object.assign([stmt], { raw: [stmt] }) as unknown as TemplateStringsArray);
+  const client = new Client({ connectionString });
   const results: string[] = [];
 
   try {
+    await client.connect();
+    results.push("Connected to database.");
+
     results.push("Creating enums and tables...");
     for (const stmt of splitStatements(MIGRATION_SQL)) {
-      await exec(stmt);
+      await client.query(stmt);
     }
     results.push("Tables created.");
 
     results.push("Creating indexes...");
     for (const stmt of splitStatements(INDEXES_SQL)) {
-      await exec(stmt);
+      await client.query(stmt);
     }
     results.push("Indexes created.");
 
     results.push("Creating foreign keys...");
     for (const stmt of splitStatements(FOREIGN_KEYS_SQL)) {
-      await exec(stmt);
+      await client.query(stmt);
     }
     results.push("Foreign keys created.");
 
-    const tableCount = await sql`SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`;
-    results.push(`Setup complete. ${tableCount[0]?.count ?? 0} tables in database.`);
+    const tableCount = await client.query("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'");
+    results.push(`Setup complete. ${tableCount.rows[0]?.count ?? 0} tables in database.`);
 
+    await client.end();
     return NextResponse.json({ success: true, results });
   } catch (error) {
+    await client.end().catch(() => {});
     results.push(`Error: ${error instanceof Error ? error.message : String(error)}`);
     return NextResponse.json({ success: false, results, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
