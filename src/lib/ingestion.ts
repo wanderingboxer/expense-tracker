@@ -23,6 +23,19 @@ import {
 } from "@/lib/deduplication";
 import { categorizeTransaction } from "@/lib/categorizer";
 
+function stripHtmlBasic(html: string): string {
+  if (!html) return "";
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&#8377;/gi, "₹")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 interface ImportStats {
   totalScanned: number;
   financialFound: number;
@@ -242,11 +255,13 @@ export async function processSingleEmail(
   const senderEmail = senderMatch ? senderMatch[1] : messageData.from;
   const senderDomain = senderEmail.split("@")[1] ?? "";
 
+  const bodyText = messageData.bodyText || stripHtmlBasic(messageData.bodyHtml);
+
   const emailData = {
     sender: messageData.from,
     senderDomain,
     subject: messageData.subject,
-    bodyText: messageData.bodyText,
+    bodyText,
   };
 
   const relevanceScore = calculateRelevanceScore(emailData);
@@ -263,7 +278,7 @@ export async function processSingleEmail(
       subject: messageData.subject,
       receivedAt: new Date(messageData.date || Date.now()),
       snippet: messageData.snippet,
-      bodyText: messageData.bodyText,
+      bodyText: bodyText,
       bodyHtml: messageData.bodyHtml,
       relevanceScore,
       isFinancial: financial,

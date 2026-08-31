@@ -246,6 +246,25 @@ export function extractMerchantName(
   return null;
 }
 
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&rsquo;/gi, "'")
+    .replace(/&lsquo;/gi, "'")
+    .replace(/&#8377;/gi, "₹")
+    .replace(/&rupee;/gi, "₹")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function parseTransactionFromEmail(email: {
   sender: string;
   senderDomain: string;
@@ -253,7 +272,7 @@ export function parseTransactionFromEmail(email: {
   bodyText: string;
   bodyHtml: string;
 }): TransactionCandidateData | null {
-  const text = email.bodyText || email.subject;
+  const text = email.bodyText || (email.bodyHtml ? stripHtml(email.bodyHtml) : "") || email.subject;
   if (!text) return null;
 
   const amounts = extractAmounts(text);
