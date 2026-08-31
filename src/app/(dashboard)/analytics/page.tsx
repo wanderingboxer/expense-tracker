@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { formatCurrency } from "@/lib/utils";
-import { cn } from "@/lib/utils";
 import {
   Card,
   CardHeader,
@@ -12,35 +11,56 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
 import {
-  TrendingUp,
-  TrendingDown,
   Calendar,
   ArrowUpRight,
   ArrowDownRight,
-  BarChart3,
-  PieChart as PieChartIcon,
-  CreditCard,
+  TrendingUp,
+  TrendingDown,
   Store,
+  CreditCard,
+  BarChart3,
 } from "lucide-react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  LineChart,
-  Line,
-  Legend,
-  Area,
-  AreaChart,
-} from "recharts";
+
+// ── Types matching real API responses ──
+
+type OverviewData = {
+  totalSpent: number;
+  totalIncome: number;
+  netCashFlow: number;
+  savingsRate: number;
+  transactionCount: number;
+  topCategory: { id: string; name: string; total: number } | null;
+  topMerchant: { id: string; name: string; total: number } | null;
+  previousPeriod: { totalSpent: number; spendingChange: number };
+};
+
+type CategoryData = {
+  categoryId: string;
+  categoryName: string;
+  icon: string | null;
+  color: string | null;
+  total: number;
+  percentage: number;
+  transactionCount: number;
+};
+
+type MerchantData = {
+  merchantId: string;
+  merchantName: string;
+  total: number;
+  transactionCount: number;
+  avgTransaction: number;
+};
+
+type MonthlyData = {
+  month: number;
+  year: number;
+  totalSpent: number;
+  totalIncome: number;
+  savings: number;
+  transactionCount: number;
+};
 
 const CHART_COLORS = [
   "hsl(142, 76%, 36%)",
@@ -53,107 +73,7 @@ const CHART_COLORS = [
   "hsl(330, 81%, 60%)",
 ];
 
-type SpendingTrend = { month: string; amount: number };
-type IncomeExpense = { month: string; income: number; expense: number };
-type SavingsRate = { month: string; rate: number };
-type CategoryBreakdown = {
-  category: string;
-  amount: number;
-  percentage: number;
-  transactionCount: number;
-};
-type MonthStats = {
-  month: string;
-  spent: number;
-  income: number;
-  savings: number;
-  topCategory: string;
-  largestTx: number;
-};
-type MerchantData = {
-  merchant: string;
-  totalSpent: number;
-  txCount: number;
-  avgTransaction: number;
-  trend: "up" | "down" | "stable";
-};
-type PaymentMethodData = {
-  method: string;
-  amount: number;
-  count: number;
-  percentage: number;
-};
-
-type AnalyticsData = {
-  spendingTrend: SpendingTrend[];
-  incomeExpense: IncomeExpense[];
-  savingsRate: SavingsRate[];
-  categories: CategoryBreakdown[];
-  monthlyStats: MonthStats[];
-  merchants: MerchantData[];
-  paymentMethods: PaymentMethodData[];
-};
-
-const MOCK_DATA: AnalyticsData = {
-  spendingTrend: [
-    { month: "Mar", amount: 38500 },
-    { month: "Apr", amount: 42200 },
-    { month: "May", amount: 35800 },
-    { month: "Jun", amount: 44100 },
-    { month: "Jul", amount: 39900 },
-    { month: "Aug", amount: 45230 },
-  ],
-  incomeExpense: [
-    { month: "Mar", income: 85000, expense: 38500 },
-    { month: "Apr", income: 85000, expense: 42200 },
-    { month: "May", income: 87000, expense: 35800 },
-    { month: "Jun", income: 85000, expense: 44100 },
-    { month: "Jul", income: 85000, expense: 39900 },
-    { month: "Aug", income: 85000, expense: 45230 },
-  ],
-  savingsRate: [
-    { month: "Mar", rate: 54.7 },
-    { month: "Apr", rate: 50.4 },
-    { month: "May", rate: 58.9 },
-    { month: "Jun", rate: 48.1 },
-    { month: "Jul", rate: 53.1 },
-    { month: "Aug", rate: 46.8 },
-  ],
-  categories: [
-    { category: "Housing", amount: 25000, percentage: 55.3, transactionCount: 1 },
-    { category: "Food & Dining", amount: 8500, percentage: 18.8, transactionCount: 24 },
-    { category: "Shopping", amount: 5200, percentage: 11.5, transactionCount: 8 },
-    { category: "Transport", amount: 3800, percentage: 8.4, transactionCount: 15 },
-    { category: "Utilities", amount: 1500, percentage: 3.3, transactionCount: 5 },
-    { category: "Entertainment", amount: 1230, percentage: 2.7, transactionCount: 3 },
-  ],
-  monthlyStats: [
-    { month: "Aug 2026", spent: 45230, income: 85000, savings: 39770, topCategory: "Housing", largestTx: 25000 },
-    { month: "Jul 2026", spent: 39900, income: 85000, savings: 45100, topCategory: "Housing", largestTx: 25000 },
-    { month: "Jun 2026", spent: 44100, income: 85000, savings: 40900, topCategory: "Housing", largestTx: 25000 },
-    { month: "May 2026", spent: 35800, income: 87000, savings: 51200, topCategory: "Housing", largestTx: 25000 },
-    { month: "Apr 2026", spent: 42200, income: 85000, savings: 42800, topCategory: "Housing", largestTx: 25000 },
-    { month: "Mar 2026", spent: 38500, income: 85000, savings: 46500, topCategory: "Housing", largestTx: 25000 },
-  ],
-  merchants: [
-    { merchant: "House Rent", totalSpent: 25000, txCount: 1, avgTransaction: 25000, trend: "stable" },
-    { merchant: "Swiggy", totalSpent: 4500, txCount: 12, avgTransaction: 375, trend: "up" },
-    { merchant: "Amazon India", totalSpent: 3200, txCount: 4, avgTransaction: 800, trend: "down" },
-    { merchant: "Zomato", totalSpent: 3100, txCount: 10, avgTransaction: 310, trend: "up" },
-    { merchant: "Uber", totalSpent: 2400, txCount: 8, avgTransaction: 300, trend: "stable" },
-    { merchant: "Flipkart", totalSpent: 1800, txCount: 3, avgTransaction: 600, trend: "down" },
-    { merchant: "BigBasket", totalSpent: 1500, txCount: 4, avgTransaction: 375, trend: "up" },
-    { merchant: "Netflix", totalSpent: 649, txCount: 1, avgTransaction: 649, trend: "stable" },
-    { merchant: "Jio Recharge", totalSpent: 299, txCount: 1, avgTransaction: 299, trend: "stable" },
-    { merchant: "Spotify", totalSpent: 119, txCount: 1, avgTransaction: 119, trend: "stable" },
-  ],
-  paymentMethods: [
-    { method: "UPI", amount: 18500, count: 35, percentage: 40.9 },
-    { method: "Credit Card", amount: 12800, count: 12, percentage: 28.3 },
-    { method: "Bank Transfer", amount: 10200, count: 5, percentage: 22.5 },
-    { method: "Debit Card", amount: 3730, count: 8, percentage: 8.3 },
-  ],
-};
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 const dateRanges = [
   { label: "This Month", value: "month" },
@@ -162,26 +82,92 @@ const dateRanges = [
   { label: "This Year", value: "year" },
 ];
 
+function getDateRange(range: string): { dateFrom: string; dateTo: string; months: number } {
+  const now = new Date();
+  const dateTo = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  let dateFrom: Date;
+  let months: number;
+
+  switch (range) {
+    case "month":
+      dateFrom = new Date(now.getFullYear(), now.getMonth(), 1);
+      months = 1;
+      break;
+    case "3months":
+      dateFrom = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      months = 3;
+      break;
+    case "6months":
+      dateFrom = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+      months = 6;
+      break;
+    case "year":
+      dateFrom = new Date(now.getFullYear(), 0, 1);
+      months = now.getMonth() + 1;
+      break;
+    default:
+      dateFrom = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+      months = 6;
+  }
+
+  return {
+    dateFrom: dateFrom.toISOString(),
+    dateTo: dateTo.toISOString(),
+    months,
+  };
+}
+
 export default function AnalyticsPage() {
-  const [data, setData] = useState<AnalyticsData | null>(null);
+  const [overview, setOverview] = useState<OverviewData | null>(null);
+  const [categories, setCategories] = useState<CategoryData[]>([]);
+  const [merchants, setMerchants] = useState<MerchantData[]>([]);
+  const [monthly, setMonthly] = useState<MonthlyData[]>([]);
   const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState("6months");
 
-  useEffect(() => {
+  const fetchData = useCallback(async (range: string) => {
     setLoading(true);
-    fetch(`/api/analytics?range=${dateRange}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setData(d ?? MOCK_DATA))
-      .catch(() => setData(MOCK_DATA))
-      .finally(() => setLoading(false));
-  }, [dateRange]);
+    const { dateFrom, dateTo, months } = getDateRange(range);
+    const qs = `dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}`;
+
+    try {
+      const [ovRes, catRes, merRes, moRes] = await Promise.all([
+        fetch(`/api/analytics/overview?${qs}`),
+        fetch(`/api/analytics/categories?${qs}`),
+        fetch(`/api/analytics/merchants?${qs}&limit=10`),
+        fetch(`/api/analytics/monthly?months=${months}`),
+      ]);
+
+      const [ovData, catData, merData, moData] = await Promise.all([
+        ovRes.ok ? ovRes.json() : null,
+        catRes.ok ? catRes.json() : [],
+        merRes.ok ? merRes.json() : [],
+        moRes.ok ? moRes.json() : [],
+      ]);
+
+      setOverview(ovData);
+      setCategories(catData ?? []);
+      setMerchants(merData ?? []);
+      setMonthly(moData ?? []);
+    } catch {
+      setOverview(null);
+      setCategories([]);
+      setMerchants([]);
+      setMonthly([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData(dateRange);
+  }, [dateRange, fetchData]);
 
   if (loading) return <LoadingSkeleton />;
 
-  const d = data!;
-
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -213,341 +199,555 @@ export default function AnalyticsPage() {
           <TabsTrigger value="categories">Categories</TabsTrigger>
           <TabsTrigger value="monthly">Monthly</TabsTrigger>
           <TabsTrigger value="merchants">Merchants</TabsTrigger>
-          <TabsTrigger value="payment-methods">Payment Methods</TabsTrigger>
         </TabsList>
 
+        {/* ── Overview Tab ── */}
         <TabsContent value="overview" className="space-y-6 mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Spending Trend</CardTitle>
-              <CardDescription>Your spending over the last 6 months</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={d.spendingTrend}>
-                    <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                    <XAxis dataKey="month" fontSize={12} />
-                    <YAxis fontSize={12} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip formatter={(v: unknown) => formatCurrency(Number(v))} />
-                    <Line
-                      type="monotone"
-                      dataKey="amount"
-                      stroke="hsl(142, 76%, 36%)"
-                      strokeWidth={2}
-                      dot={{ r: 4 }}
-                      name="Spending"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+          {overview ? (
+            <>
+              {/* Stat Cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard
+                  label="Total Spending"
+                  value={formatCurrency(overview.totalSpent)}
+                  change={overview.previousPeriod.spendingChange}
+                  icon={<CreditCard className="w-4 h-4" />}
+                />
+                <StatCard
+                  label="Total Income"
+                  value={formatCurrency(overview.totalIncome)}
+                  icon={<TrendingUp className="w-4 h-4" />}
+                />
+                <StatCard
+                  label="Net Cash Flow"
+                  value={formatCurrency(overview.netCashFlow)}
+                  positive={overview.netCashFlow >= 0}
+                  icon={<BarChart3 className="w-4 h-4" />}
+                />
+                <StatCard
+                  label="Savings Rate"
+                  value={`${overview.savingsRate}%`}
+                  icon={<TrendingUp className="w-4 h-4" />}
+                />
               </div>
-            </CardContent>
-          </Card>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Income vs Expenses</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={d.incomeExpense}>
-                      <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                      <XAxis dataKey="month" fontSize={12} />
-                      <YAxis fontSize={12} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-                      <Tooltip formatter={(v: unknown) => formatCurrency(Number(v))} />
-                      <Legend />
-                      <Bar dataKey="income" fill="hsl(142, 76%, 36%)" radius={[4, 4, 0, 0]} name="Income" />
-                      <Bar dataKey="expense" fill="hsl(346, 87%, 43%)" radius={[4, 4, 0, 0]} name="Expenses" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardDescription>Transactions</CardDescription>
+                    <CardTitle className="text-2xl">{overview.transactionCount}</CardTitle>
+                  </CardHeader>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardDescription>Top Category</CardDescription>
+                    <CardTitle className="text-lg">
+                      {overview.topCategory?.name ?? "N/A"}
+                    </CardTitle>
+                    {overview.topCategory && (
+                      <p className="text-sm text-gray-500">{formatCurrency(overview.topCategory.total)}</p>
+                    )}
+                  </CardHeader>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardDescription>Top Merchant</CardDescription>
+                    <CardTitle className="text-lg">
+                      {overview.topMerchant?.name ?? "N/A"}
+                    </CardTitle>
+                    {overview.topMerchant && (
+                      <p className="text-sm text-gray-500">{formatCurrency(overview.topMerchant.total)}</p>
+                    )}
+                  </CardHeader>
+                </Card>
+              </div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Savings Rate</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={d.savingsRate}>
-                      <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                      <XAxis dataKey="month" fontSize={12} />
-                      <YAxis fontSize={12} tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
-                      <Tooltip formatter={(v: unknown) => `${v}%`} />
-                      <Area
-                        type="monotone"
-                        dataKey="rate"
-                        stroke="hsl(217, 91%, 60%)"
-                        fill="hsl(217, 91%, 60%)"
-                        fillOpacity={0.15}
-                        strokeWidth={2}
-                        name="Savings Rate"
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+              {/* Monthly spending bar chart */}
+              {monthly.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Spending Trend</CardTitle>
+                    <CardDescription>Monthly spending over the selected period</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <CSSBarChart
+                      data={monthly.map((m) => ({
+                        label: `${MONTH_NAMES[m.month - 1]} ${String(m.year).slice(2)}`,
+                        value: m.totalSpent,
+                      }))}
+                      color="hsl(346, 87%, 43%)"
+                      formatValue={formatCurrency}
+                    />
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Income vs Expense */}
+              {monthly.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Income vs Expenses</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <CSSDoubleBarChart
+                      data={monthly.map((m) => ({
+                        label: `${MONTH_NAMES[m.month - 1]} ${String(m.year).slice(2)}`,
+                        value1: m.totalIncome,
+                        value2: m.totalSpent,
+                      }))}
+                      label1="Income"
+                      label2="Expenses"
+                      color1="hsl(142, 76%, 36%)"
+                      color2="hsl(346, 87%, 43%)"
+                      formatValue={formatCurrency}
+                    />
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          ) : (
+            <EmptyState message="No analytics data available for this period." />
+          )}
         </TabsContent>
 
+        {/* ── Categories Tab ── */}
         <TabsContent value="categories" className="space-y-6 mt-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Spending by Category</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={d.categories}
-                        dataKey="amount"
-                        nameKey="category"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={100}
-                        paddingAngle={2}
-                      >
-                        {d.categories.map((_, i) => (
-                          <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(v: unknown) => formatCurrency(Number(v))} />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
+          {categories.length > 0 ? (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Spending by Category</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {categories.map((cat, i) => (
+                      <div key={cat.categoryId}>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="w-3 h-3 rounded-full inline-block flex-shrink-0"
+                              style={{ backgroundColor: cat.color ?? CHART_COLORS[i % CHART_COLORS.length] }}
+                            />
+                            <span className="text-sm text-gray-900 dark:text-white">{cat.categoryName}</span>
+                          </div>
+                          <span className="text-sm font-medium text-gray-900 dark:text-white">
+                            {formatCurrency(cat.total)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="flex-1 h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full transition-all duration-500"
+                              style={{
+                                width: `${cat.percentage}%`,
+                                backgroundColor: cat.color ?? CHART_COLORS[i % CHART_COLORS.length],
+                              }}
+                            />
+                          </div>
+                          <span className="text-xs text-gray-500 w-12 text-right">{cat.percentage}%</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
 
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Category Breakdown</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-200 dark:border-gray-700">
+                          <th className="text-left py-2 font-medium text-gray-500">Category</th>
+                          <th className="text-right py-2 font-medium text-gray-500">Amount</th>
+                          <th className="text-right py-2 font-medium text-gray-500">%</th>
+                          <th className="text-right py-2 font-medium text-gray-500">Txns</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {categories.map((cat, i) => (
+                          <tr
+                            key={cat.categoryId}
+                            className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50"
+                          >
+                            <td className="py-3 flex items-center gap-2">
+                              <span
+                                className="w-3 h-3 rounded-full inline-block"
+                                style={{ backgroundColor: cat.color ?? CHART_COLORS[i % CHART_COLORS.length] }}
+                              />
+                              <span className="text-gray-900 dark:text-white">{cat.categoryName}</span>
+                            </td>
+                            <td className="text-right text-gray-900 dark:text-white font-medium">
+                              {formatCurrency(cat.total)}
+                            </td>
+                            <td className="text-right text-gray-500">{cat.percentage}%</td>
+                            <td className="text-right text-gray-500">{cat.transactionCount}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          ) : (
+            <EmptyState message="No category data available for this period." />
+          )}
+        </TabsContent>
+
+        {/* ── Monthly Tab ── */}
+        <TabsContent value="monthly" className="space-y-6 mt-6">
+          {monthly.length > 0 ? (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Monthly Comparison</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CSSStackedBarChart
+                    data={monthly.map((m) => ({
+                      label: `${MONTH_NAMES[m.month - 1]} ${m.year}`,
+                      values: [
+                        { value: m.totalIncome, color: "hsl(142, 76%, 36%)", name: "Income" },
+                        { value: m.totalSpent, color: "hsl(346, 87%, 43%)", name: "Spent" },
+                        { value: Math.max(0, m.savings), color: "hsl(217, 91%, 60%)", name: "Savings" },
+                      ],
+                    }))}
+                    formatValue={formatCurrency}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Month Details</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-200 dark:border-gray-700">
+                          <th className="text-left py-2 font-medium text-gray-500">Month</th>
+                          <th className="text-right py-2 font-medium text-gray-500">Spent</th>
+                          <th className="text-right py-2 font-medium text-gray-500">Income</th>
+                          <th className="text-right py-2 font-medium text-gray-500">Savings</th>
+                          <th className="text-right py-2 font-medium text-gray-500 hidden md:table-cell">Txns</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...monthly].reverse().map((m) => (
+                          <tr key={`${m.year}-${m.month}`} className="border-b border-gray-100 dark:border-gray-800">
+                            <td className="py-3 text-gray-900 dark:text-white font-medium">
+                              {MONTH_NAMES[m.month - 1]} {m.year}
+                            </td>
+                            <td className="text-right text-red-600 dark:text-red-400">
+                              {formatCurrency(m.totalSpent)}
+                            </td>
+                            <td className="text-right text-emerald-600 dark:text-emerald-400">
+                              {formatCurrency(m.totalIncome)}
+                            </td>
+                            <td className="text-right text-blue-600 dark:text-blue-400">
+                              {formatCurrency(m.savings)}
+                            </td>
+                            <td className="text-right text-gray-500 hidden md:table-cell">
+                              {m.transactionCount}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            <EmptyState message="No monthly data available for this period." />
+          )}
+        </TabsContent>
+
+        {/* ── Merchants Tab ── */}
+        <TabsContent value="merchants" className="mt-6">
+          {merchants.length > 0 ? (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Category Breakdown</CardTitle>
+                <CardTitle className="text-base">Top Merchants</CardTitle>
+                <CardDescription>Your most frequented merchants this period</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-200 dark:border-gray-700">
-                        <th className="text-left py-2 font-medium text-gray-500">Category</th>
-                        <th className="text-right py-2 font-medium text-gray-500">Amount</th>
-                        <th className="text-right py-2 font-medium text-gray-500">%</th>
+                        <th className="text-left py-2 font-medium text-gray-500">#</th>
+                        <th className="text-left py-2 font-medium text-gray-500">Merchant</th>
+                        <th className="text-right py-2 font-medium text-gray-500">Total Spent</th>
                         <th className="text-right py-2 font-medium text-gray-500">Txns</th>
+                        <th className="text-right py-2 font-medium text-gray-500 hidden sm:table-cell">Avg Tx</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {d.categories.map((cat, i) => (
-                        <tr
-                          key={cat.category}
-                          className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer"
-                        >
-                          <td className="py-3 flex items-center gap-2">
-                            <span
-                              className="w-3 h-3 rounded-full inline-block"
-                              style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
-                            />
-                            <span className="text-gray-900 dark:text-white">{cat.category}</span>
-                          </td>
+                      {merchants.map((m, i) => (
+                        <tr key={m.merchantId} className="border-b border-gray-100 dark:border-gray-800">
+                          <td className="py-3 text-gray-400">{i + 1}</td>
+                          <td className="py-3 text-gray-900 dark:text-white font-medium">{m.merchantName}</td>
                           <td className="text-right text-gray-900 dark:text-white font-medium">
-                            {formatCurrency(cat.amount)}
+                            {formatCurrency(m.total)}
                           </td>
-                          <td className="text-right text-gray-500">{cat.percentage}%</td>
-                          <td className="text-right text-gray-500">{cat.transactionCount}</td>
+                          <td className="text-right text-gray-500">{m.transactionCount}</td>
+                          <td className="text-right text-gray-500 hidden sm:table-cell">
+                            {formatCurrency(m.avgTransaction)}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
 
-        <TabsContent value="monthly" className="space-y-6 mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Monthly Comparison</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={d.monthlyStats}>
-                    <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                    <XAxis dataKey="month" fontSize={12} tickFormatter={(v) => v.split(" ")[0]} />
-                    <YAxis fontSize={12} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip formatter={(v: unknown) => formatCurrency(Number(v))} />
-                    <Legend />
-                    <Bar dataKey="income" fill="hsl(142, 76%, 36%)" radius={[4, 4, 0, 0]} name="Income" />
-                    <Bar dataKey="spent" fill="hsl(346, 87%, 43%)" radius={[4, 4, 0, 0]} name="Spent" />
-                    <Bar dataKey="savings" fill="hsl(217, 91%, 60%)" radius={[4, 4, 0, 0]} name="Savings" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Month Details</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 dark:border-gray-700">
-                      <th className="text-left py-2 font-medium text-gray-500">Month</th>
-                      <th className="text-right py-2 font-medium text-gray-500">Spent</th>
-                      <th className="text-right py-2 font-medium text-gray-500">Income</th>
-                      <th className="text-right py-2 font-medium text-gray-500">Savings</th>
-                      <th className="text-left py-2 font-medium text-gray-500 hidden md:table-cell">Top Category</th>
-                      <th className="text-right py-2 font-medium text-gray-500 hidden md:table-cell">Largest Tx</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {d.monthlyStats.map((m) => (
-                      <tr key={m.month} className="border-b border-gray-100 dark:border-gray-800">
-                        <td className="py-3 text-gray-900 dark:text-white font-medium">{m.month}</td>
-                        <td className="text-right text-red-600 dark:text-red-400">{formatCurrency(m.spent)}</td>
-                        <td className="text-right text-emerald-600 dark:text-emerald-400">{formatCurrency(m.income)}</td>
-                        <td className="text-right text-blue-600 dark:text-blue-400">{formatCurrency(m.savings)}</td>
-                        <td className="text-left text-gray-500 hidden md:table-cell">{m.topCategory}</td>
-                        <td className="text-right text-gray-500 hidden md:table-cell">{formatCurrency(m.largestTx)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="merchants" className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Top Merchants</CardTitle>
-              <CardDescription>Your most frequented merchants this period</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 dark:border-gray-700">
-                      <th className="text-left py-2 font-medium text-gray-500">#</th>
-                      <th className="text-left py-2 font-medium text-gray-500">Merchant</th>
-                      <th className="text-right py-2 font-medium text-gray-500">Total Spent</th>
-                      <th className="text-right py-2 font-medium text-gray-500">Txns</th>
-                      <th className="text-right py-2 font-medium text-gray-500 hidden sm:table-cell">Avg Tx</th>
-                      <th className="text-center py-2 font-medium text-gray-500 hidden sm:table-cell">Trend</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {d.merchants.map((m, i) => (
-                      <tr key={m.merchant} className="border-b border-gray-100 dark:border-gray-800">
-                        <td className="py-3 text-gray-400">{i + 1}</td>
-                        <td className="py-3 text-gray-900 dark:text-white font-medium">{m.merchant}</td>
-                        <td className="text-right text-gray-900 dark:text-white font-medium">
-                          {formatCurrency(m.totalSpent)}
-                        </td>
-                        <td className="text-right text-gray-500">{m.txCount}</td>
-                        <td className="text-right text-gray-500 hidden sm:table-cell">
-                          {formatCurrency(m.avgTransaction)}
-                        </td>
-                        <td className="text-center hidden sm:table-cell">
-                          {m.trend === "up" && <ArrowUpRight className="w-4 h-4 text-red-500 inline" />}
-                          {m.trend === "down" && <ArrowDownRight className="w-4 h-4 text-emerald-500 inline" />}
-                          {m.trend === "stable" && <span className="text-gray-400">--</span>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="payment-methods" className="space-y-6 mt-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Payment Method Distribution</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={d.paymentMethods}
-                        dataKey="amount"
-                        nameKey="method"
-                        cx="50%"
-                        cy="50%"
-                        outerRadius={100}
-                        paddingAngle={2}
-                      >
-                        {d.paymentMethods.map((_, i) => (
-                          <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(v: unknown) => formatCurrency(Number(v))} />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Breakdown</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {d.paymentMethods.map((pm, i) => (
-                    <div key={pm.method}>
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="w-3 h-3 rounded-full inline-block"
-                            style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
-                          />
-                          <span className="text-sm text-gray-900 dark:text-white">{pm.method}</span>
-                        </div>
-                        <span className="text-sm font-medium text-gray-900 dark:text-white">
-                          {formatCurrency(pm.amount)}
+                {/* Visual bar breakdown for merchants */}
+                <div className="mt-6 space-y-3">
+                  {(() => {
+                    const maxTotal = Math.max(...merchants.map((m) => m.total), 1);
+                    return merchants.map((m, i) => (
+                      <div key={m.merchantId} className="flex items-center gap-3">
+                        <span className="text-sm text-gray-600 dark:text-gray-400 w-28 truncate flex-shrink-0">
+                          {m.merchantName}
                         </span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1 h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                        <div className="flex-1 h-4 bg-gray-100 dark:bg-gray-800 rounded overflow-hidden">
                           <div
-                            className="h-full rounded-full"
+                            className="h-full rounded transition-all duration-500"
                             style={{
-                              width: `${pm.percentage}%`,
+                              width: `${(m.total / maxTotal) * 100}%`,
                               backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
                             }}
                           />
                         </div>
-                        <span className="text-xs text-gray-500 w-12 text-right">{pm.percentage}%</span>
+                        <span className="text-xs text-gray-500 w-20 text-right flex-shrink-0">
+                          {formatCurrency(m.total)}
+                        </span>
                       </div>
-                      <p className="text-xs text-gray-400 mt-1">{pm.count} transactions</p>
-                    </div>
-                  ))}
+                    ));
+                  })()}
                 </div>
               </CardContent>
             </Card>
-          </div>
+          ) : (
+            <EmptyState message="No merchant data available for this period." />
+          )}
         </TabsContent>
       </Tabs>
     </div>
   );
 }
+
+// ── CSS Bar Chart Components ──
+
+function CSSBarChart({
+  data,
+  color,
+  formatValue,
+}: {
+  data: { label: string; value: number }[];
+  color: string;
+  formatValue: (v: number) => string;
+}) {
+  const maxVal = Math.max(...data.map((d) => d.value), 1);
+  return (
+    <div className="flex items-end gap-2 h-52">
+      {data.map((d) => (
+        <div key={d.label} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
+          <span className="text-xs text-gray-500 truncate max-w-full">{formatValue(d.value)}</span>
+          <div
+            className="w-full rounded-t transition-all duration-500"
+            style={{
+              height: `${(d.value / maxVal) * 80}%`,
+              backgroundColor: color,
+              minHeight: d.value > 0 ? "4px" : "0",
+            }}
+          />
+          <span className="text-xs text-gray-500 truncate max-w-full">{d.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CSSDoubleBarChart({
+  data,
+  label1,
+  label2,
+  color1,
+  color2,
+  formatValue,
+}: {
+  data: { label: string; value1: number; value2: number }[];
+  label1: string;
+  label2: string;
+  color1: string;
+  color2: string;
+  formatValue: (v: number) => string;
+}) {
+  const maxVal = Math.max(...data.flatMap((d) => [d.value1, d.value2]), 1);
+  return (
+    <div>
+      <div className="flex items-center gap-4 mb-4 text-xs text-gray-500">
+        <span className="flex items-center gap-1">
+          <span className="w-3 h-3 rounded" style={{ backgroundColor: color1 }} /> {label1}
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-3 h-3 rounded" style={{ backgroundColor: color2 }} /> {label2}
+        </span>
+      </div>
+      <div className="flex items-end gap-3 h-48">
+        {data.map((d) => (
+          <div key={d.label} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
+            <div className="flex gap-1 w-full h-full items-end justify-center">
+              <div
+                className="flex-1 rounded-t transition-all duration-500"
+                style={{
+                  height: `${(d.value1 / maxVal) * 100}%`,
+                  backgroundColor: color1,
+                  minHeight: d.value1 > 0 ? "4px" : "0",
+                }}
+                title={`${label1}: ${formatValue(d.value1)}`}
+              />
+              <div
+                className="flex-1 rounded-t transition-all duration-500"
+                style={{
+                  height: `${(d.value2 / maxVal) * 100}%`,
+                  backgroundColor: color2,
+                  minHeight: d.value2 > 0 ? "4px" : "0",
+                }}
+                title={`${label2}: ${formatValue(d.value2)}`}
+              />
+            </div>
+            <span className="text-xs text-gray-500 truncate max-w-full">{d.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CSSStackedBarChart({
+  data,
+  formatValue,
+}: {
+  data: { label: string; values: { value: number; color: string; name: string }[] }[];
+  formatValue: (v: number) => string;
+}) {
+  const maxVal = Math.max(...data.map((d) => Math.max(...d.values.map((v) => v.value))), 1);
+
+  // Legend
+  const legendItems = data[0]?.values.map((v) => ({ name: v.name, color: v.color })) ?? [];
+
+  return (
+    <div>
+      <div className="flex items-center gap-4 mb-4 text-xs text-gray-500">
+        {legendItems.map((l) => (
+          <span key={l.name} className="flex items-center gap-1">
+            <span className="w-3 h-3 rounded" style={{ backgroundColor: l.color }} /> {l.name}
+          </span>
+        ))}
+      </div>
+      <div className="flex items-end gap-3 h-48">
+        {data.map((d) => (
+          <div key={d.label} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
+            <div className="flex gap-1 w-full h-full items-end justify-center">
+              {d.values.map((v, i) => (
+                <div
+                  key={i}
+                  className="flex-1 rounded-t transition-all duration-500"
+                  style={{
+                    height: `${(v.value / maxVal) * 100}%`,
+                    backgroundColor: v.color,
+                    minHeight: v.value > 0 ? "4px" : "0",
+                  }}
+                  title={`${v.name}: ${formatValue(v.value)}`}
+                />
+              ))}
+            </div>
+            <span className="text-xs text-gray-500 truncate max-w-full">{d.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Stat Card ──
+
+function StatCard({
+  label,
+  value,
+  change,
+  positive,
+  icon,
+}: {
+  label: string;
+  value: string;
+  change?: number;
+  positive?: boolean;
+  icon: React.ReactNode;
+}) {
+  return (
+    <Card>
+      <CardContent className="pt-6">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm text-gray-500 dark:text-gray-400">{label}</span>
+          <span className="text-gray-400">{icon}</span>
+        </div>
+        <p className="text-xl font-bold text-gray-900 dark:text-white">{value}</p>
+        {change !== undefined && (
+          <div className="flex items-center gap-1 mt-1">
+            {change > 0 ? (
+              <ArrowUpRight className="w-3 h-3 text-red-500" />
+            ) : change < 0 ? (
+              <ArrowDownRight className="w-3 h-3 text-emerald-500" />
+            ) : null}
+            <span
+              className={`text-xs ${
+                change > 0
+                  ? "text-red-500"
+                  : change < 0
+                  ? "text-emerald-500"
+                  : "text-gray-400"
+              }`}
+            >
+              {change > 0 ? "+" : ""}
+              {change}% vs prev period
+            </span>
+          </div>
+        )}
+        {positive !== undefined && change === undefined && (
+          <span className={`text-xs ${positive ? "text-emerald-500" : "text-red-500"}`}>
+            {positive ? "Positive" : "Negative"}
+          </span>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Empty State ──
+
+function EmptyState({ message }: { message: string }) {
+  return (
+    <Card>
+      <CardContent className="py-16 text-center">
+        <BarChart3 className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+        <p className="text-gray-500 dark:text-gray-400">{message}</p>
+        <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
+          Try selecting a different date range or add some transactions.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Loading Skeleton ──
 
 function LoadingSkeleton() {
   return (
@@ -557,6 +757,12 @@ function LoadingSkeleton() {
         <Skeleton className="h-4 w-64 mt-2" />
       </div>
       <Skeleton className="h-10 w-full max-w-lg" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Skeleton className="h-28" />
+        <Skeleton className="h-28" />
+        <Skeleton className="h-28" />
+        <Skeleton className="h-28" />
+      </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Skeleton className="h-80" />
         <Skeleton className="h-80" />

@@ -472,17 +472,16 @@ export default function TransactionDetailPage() {
                 Category
               </label>
               <select
-                value={editForm.category}
-                onChange={(e) => setEditForm((p) => ({ ...p, category: e.target.value }))}
+                value={editForm.categoryId}
+                onChange={(e) => setEditForm((p) => ({ ...p, categoryId: e.target.value }))}
                 className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm px-3 py-2 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
               >
-                {["Food & Dining", "Shopping", "Transport", "Housing", "Utilities", "Entertainment", "Groceries", "Health & Fitness", "Education", "Other"].map(
-                  (c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  )
-                )}
+                <option value="">Uncategorized</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -502,16 +501,9 @@ export default function TransactionDetailPage() {
             <Button
               onClick={async () => {
                 try {
-                  // The API expects categoryId, not a category name.
-                  // For now we send categoryId as null to clear it if changed,
-                  // and let the backend handle it. A full implementation would
-                  // fetch categories and map names to IDs.
-                  const body: Record<string, unknown> = {};
-                  if (editForm.category !== (tx.category?.name ?? "")) {
-                    // TODO: fetch /api/categories to resolve name -> id
-                    // For now we leave categoryId unchanged if name didn't change
-                    body.categoryId = null;
-                  }
+                  const body: Record<string, unknown> = {
+                    categoryId: editForm.categoryId || null,
+                  };
                   const updated = await patchTransaction(body);
                   setTx(updated);
                   setEditOpen(false);
