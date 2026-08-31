@@ -1,5 +1,6 @@
 export const KNOWN_FINANCIAL_DOMAINS = [
   "hdfcbank.net",
+  "hdfcbank.bank.in",
   "icicibank.com",
   "sbi.co.in",
   "axisbank.com",
@@ -149,6 +150,6 @@ export function calculateRelevanceScore(email: EmailForScoring): number {
   return Math.max(0, Math.min(100, score));
 }
 
-export function isFinancialEmail(score: number, threshold = 40): boolean {
+export function isFinancialEmail(score: number, threshold = 20): boolean {
   return score >= threshold;
 }
