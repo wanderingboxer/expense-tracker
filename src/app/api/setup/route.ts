@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { neon } from "@neondatabase/serverless";
 
 const MIGRATION_SQL = `
 -- CreateSchema
@@ -399,6 +399,38 @@ DO $$ BEGIN ALTER TABLE "SavingsGoal" ADD CONSTRAINT "SavingsGoal_userId_fkey" F
 DO $$ BEGIN ALTER TABLE "AuditLog" ADD CONSTRAINT "AuditLog_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN null; END $$;
 `;
 
+function splitStatements(sql: string): string[] {
+  const statements: string[] = [];
+  let current = "";
+  let inDollarQuote = false;
+
+  for (const line of sql.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("--")) {
+      if (inDollarQuote) current += line + "\n";
+      continue;
+    }
+
+    if (trimmed.startsWith("DO $$") || trimmed.includes("DO $$")) {
+      inDollarQuote = true;
+    }
+
+    current += line + "\n";
+
+    if (inDollarQuote && trimmed.endsWith("$$;")) {
+      statements.push(current.trim());
+      current = "";
+      inDollarQuote = false;
+    } else if (!inDollarQuote && trimmed.endsWith(";")) {
+      statements.push(current.trim());
+      current = "";
+    }
+  }
+
+  if (current.trim()) statements.push(current.trim());
+  return statements.filter(s => s.length > 0);
+}
+
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const secret = body.secret;
@@ -407,35 +439,40 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized. Pass {\"secret\": \"your-NEXTAUTH_SECRET-value\"}" }, { status: 401 });
   }
 
+  const connectionString = process.env.POSTGRES_PRISMA_URL ?? process.env.DATABASE_URL;
+  if (!connectionString) {
+    return NextResponse.json({ error: "No database connection string found" }, { status: 500 });
+  }
+
+  const sql = neon(connectionString);
   const results: string[] = [];
 
   try {
-    // Step 1: Create enums and tables
     results.push("Creating enums and tables...");
-    await prisma.$executeRawUnsafe(MIGRATION_SQL);
+    for (const stmt of splitStatements(MIGRATION_SQL)) {
+      await sql(stmt);
+    }
     results.push("Tables created.");
 
-    // Step 2: Create indexes
     results.push("Creating indexes...");
-    await prisma.$executeRawUnsafe(INDEXES_SQL);
+    for (const stmt of splitStatements(INDEXES_SQL)) {
+      await sql(stmt);
+    }
     results.push("Indexes created.");
 
-    // Step 3: Create foreign keys
     results.push("Creating foreign keys...");
-    await prisma.$executeRawUnsafe(FOREIGN_KEYS_SQL);
+    for (const stmt of splitStatements(FOREIGN_KEYS_SQL)) {
+      await sql(stmt);
+    }
     results.push("Foreign keys created.");
 
-    // Step 4: Verify
-    const tableCount = await prisma.$queryRawUnsafe<Array<{ count: bigint }>>(
-      `SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`
-    );
-
+    const tableCount = await sql`SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`;
     results.push(`Setup complete. ${tableCount[0]?.count ?? 0} tables in database.`);
 
     return NextResponse.json({ success: true, results });
   } catch (error) {
-    results.push(`Error: ${String(error)}`);
-    return NextResponse.json({ success: false, results, error: String(error) }, { status: 500 });
+    results.push(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    return NextResponse.json({ success: false, results, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
 }
 
