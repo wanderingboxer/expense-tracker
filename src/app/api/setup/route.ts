@@ -439,7 +439,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized. Pass {\"secret\": \"your-NEXTAUTH_SECRET-value\"}" }, { status: 401 });
   }
 
-  const connectionString = process.env.POSTGRES_PRISMA_URL ?? process.env.POSTGRES_URL ?? process.env.POSTGRES_URL_NON_POOLING ?? process.env.DATABASE_URL;
+  const connectionString = process.env.POSTGRES_PRISMA_URL ?? process.env.POSTGRES_PRISMA_DATABASE_URL ?? process.env.POSTGRES_URL ?? process.env.POSTGRES_DATABASE_URL ?? process.env.POSTGRES_URL_NON_POOLING ?? process.env.DATABASE_URL;
   if (!connectionString) {
     return NextResponse.json({ error: "No database connection string found" }, { status: 500 });
   }
