@@ -277,11 +277,11 @@ export default function ReviewPage() {
                     {merchantName}
                   </code>
                 </p>
-                {suggested?.suggestedMerchantName && (
+                {suggested?.suggestedMerchantName ? (
                   <p className="text-xs text-gray-500 mt-1">
-                    Suggestion: Map to {suggested.suggestedMerchantName as string}
+                    Suggestion: Map to {String(suggested.suggestedMerchantName)}
                   </p>
-                )}
+                ) : null}
               </div>
             </div>
 
