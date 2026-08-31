@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import {
@@ -27,72 +27,37 @@ import {
   ChevronDown,
   ChevronUp,
   PartyPopper,
+  Loader2,
 } from "lucide-react";
 
 type ReviewItem = {
   id: string;
-  type: "duplicate" | "category" | "merchant" | "transfer" | "refund";
-  status: "pending" | "resolved";
-  // duplicate fields
-  tx1?: { merchant: string; amount: number; date: string; paymentMethod: string };
-  tx2?: { merchant: string; amount: number; date: string; paymentMethod: string };
-  matchScore?: number;
-  matchReasons?: string[];
-  // category fields
-  transaction?: { merchant: string; amount: number; date: string };
-  suggestedCategory?: string;
-  currentCategory?: string;
-  categoryConfidence?: number;
-  // merchant fields
-  merchantName?: string;
-  suggestedAction?: string;
+  type: string;
+  status: string;
+  transaction?: {
+    merchant?: { name: string } | null;
+    amount: number;
+    transactionDate: string;
+    category?: { id: string; name: string } | null;
+  } | null;
+  relatedTransaction?: {
+    merchant?: { name: string } | null;
+    amount: number;
+    transactionDate: string;
+  } | null;
+  matchScore?: number | null;
+  matchReasons?: string[] | null;
+  suggestedAction?: Record<string, unknown> | null;
+  description?: string | null;
 };
 
-const MOCK_ITEMS: ReviewItem[] = [
-  {
-    id: "1",
-    type: "duplicate",
-    status: "pending",
-    tx1: { merchant: "Swiggy", amount: 450, date: "2026-08-15", paymentMethod: "UPI" },
-    tx2: { merchant: "Swiggy Food Order", amount: 450, date: "2026-08-15", paymentMethod: "UPI" },
-    matchScore: 92,
-    matchReasons: ["Same amount", "Same date", "Similar merchant name", "Same payment method"],
-  },
-  {
-    id: "2",
-    type: "category",
-    status: "pending",
-    transaction: { merchant: "Decathlon", amount: 3499, date: "2026-08-13" },
-    suggestedCategory: "Health & Fitness",
-    currentCategory: "Shopping",
-    categoryConfidence: 78,
-  },
-  {
-    id: "3",
-    type: "merchant",
-    status: "pending",
-    merchantName: "GPAY*RAZRPY*SwiggyIn",
-    suggestedAction: "Map to Swiggy",
-  },
-  {
-    id: "4",
-    type: "category",
-    status: "pending",
-    transaction: { merchant: "PhonePe", amount: 1200, date: "2026-08-12" },
-    suggestedCategory: "Utilities",
-    currentCategory: "Other",
-    categoryConfidence: 65,
-  },
-  {
-    id: "5",
-    type: "duplicate",
-    status: "resolved",
-    tx1: { merchant: "Netflix", amount: 649, date: "2026-08-01", paymentMethod: "Credit Card" },
-    tx2: { merchant: "NETFLIX.COM", amount: 649, date: "2026-08-01", paymentMethod: "Credit Card" },
-    matchScore: 97,
-    matchReasons: ["Identical amount", "Same date", "Known merchant alias"],
-  },
-];
+const TYPE_MAP: Record<string, string> = {
+  POSSIBLE_DUPLICATE: "duplicate",
+  UNCERTAIN_CATEGORY: "category",
+  UNKNOWN_MERCHANT: "merchant",
+  POSSIBLE_TRANSFER: "transfer",
+  POSSIBLE_REFUND: "refund",
+};
 
 const TYPE_ICONS: Record<string, typeof Copy> = {
   duplicate: Copy,
@@ -105,23 +70,51 @@ const TYPE_ICONS: Record<string, typeof Copy> = {
 export default function ReviewPage() {
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [resolving, setResolving] = useState<string | null>(null);
   const [showResolved, setShowResolved] = useState(false);
 
-  useEffect(() => {
-    fetch("/api/review")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setItems(d?.items ?? MOCK_ITEMS))
-      .catch(() => setItems(MOCK_ITEMS))
-      .finally(() => setLoading(false));
+  const fetchItems = useCallback(async () => {
+    try {
+      const r = await fetch("/api/review");
+      if (r.ok) {
+        const data = await r.json();
+        setItems(Array.isArray(data) ? data : []);
+      } else {
+        setItems([]);
+      }
+    } catch {
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const resolve = (id: string) => {
-    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, status: "resolved" as const } : i)));
+  useEffect(() => {
+    fetchItems();
+  }, [fetchItems]);
+
+  const resolve = async (id: string, action: string, categoryId?: string) => {
+    setResolving(id);
+    try {
+      const r = await fetch("/api/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewItemId: id, action, ...(categoryId ? { categoryId } : {}) }),
+      });
+      if (r.ok) {
+        // Remove resolved item from list
+        setItems((prev) => prev.filter((i) => i.id !== id));
+      }
+    } finally {
+      setResolving(null);
+    }
   };
 
-  const pending = items.filter((i) => i.status === "pending");
-  const resolved = items.filter((i) => i.status === "resolved");
-  const pendingByType = (type: string) => pending.filter((i) => i.type === type);
+  const normalizedType = (item: ReviewItem) => TYPE_MAP[item.type] || item.type;
+
+  const pending = items.filter((i) => i.status === "PENDING");
+  const resolved = items.filter((i) => i.status !== "PENDING");
+  const pendingByType = (type: string) => pending.filter((i) => normalizedType(i) === type);
 
   if (loading) {
     return (
@@ -135,11 +128,15 @@ export default function ReviewPage() {
   }
 
   const renderItem = (item: ReviewItem) => {
-    const Icon = TYPE_ICONS[item.type] || Tag;
+    const type = normalizedType(item);
+    const isResolving = resolving === item.id;
+    const isPending = item.status === "PENDING";
 
-    if (item.type === "duplicate") {
+    if (type === "duplicate") {
+      const tx1 = item.transaction;
+      const tx2 = item.relatedTransaction;
       return (
-        <Card key={item.id} className={cn(item.status === "resolved" && "opacity-60")}>
+        <Card key={item.id} className={cn(!isPending && "opacity-60")}>
           <CardContent className="pt-6">
             <div className="flex items-start gap-3 mb-4">
               <div className="w-8 h-8 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 flex items-center justify-center shrink-0">
@@ -150,31 +147,35 @@ export default function ReviewPage() {
                   <h3 className="font-semibold text-gray-900 dark:text-white text-sm">
                     Possible Duplicate
                   </h3>
-                  <Badge variant="outline" className="text-xs">
-                    {item.matchScore}% match
-                  </Badge>
+                  {item.matchScore != null && (
+                    <Badge variant="outline" className="text-xs">
+                      {item.matchScore}% match
+                    </Badge>
+                  )}
                 </div>
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-              {[item.tx1, item.tx2].map((tx, idx) => (
+              {[tx1, tx2].map((tx, idx) => (
                 <div
                   key={idx}
                   className="rounded-lg border border-gray-200 dark:border-gray-700 p-3"
                 >
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">{tx?.merchant}</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">
+                    {tx?.merchant?.name || "Unknown"}
+                  </p>
                   <p className="text-lg font-bold text-gray-900 dark:text-white">
-                    {formatCurrency(tx?.amount ?? 0)}
+                    {formatCurrency(Number(tx?.amount ?? 0))}
                   </p>
                   <p className="text-xs text-gray-500">
-                    {tx?.date} &middot; {tx?.paymentMethod}
+                    {tx?.transactionDate ? new Date(tx.transactionDate).toLocaleDateString() : ""}
                   </p>
                 </div>
               ))}
             </div>
 
-            {item.matchReasons && (
+            {item.matchReasons && item.matchReasons.length > 0 && (
               <div className="mb-4 space-y-1">
                 {item.matchReasons.map((r, i) => (
                   <p key={i} className="text-xs text-gray-500 flex items-center gap-1">
@@ -185,13 +186,13 @@ export default function ReviewPage() {
               </div>
             )}
 
-            {item.status === "pending" && (
+            {isPending && (
               <div className="flex items-center gap-2">
-                <Button size="sm" onClick={() => resolve(item.id)}>
-                  <Merge className="w-4 h-4 mr-1" />
+                <Button size="sm" onClick={() => resolve(item.id, "accept_merge")} disabled={isResolving}>
+                  {isResolving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Merge className="w-4 h-4 mr-1" />}
                   Merge
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => resolve(item.id)}>
+                <Button variant="outline" size="sm" onClick={() => resolve(item.id, "keep_separate")} disabled={isResolving}>
                   <Split className="w-4 h-4 mr-1" />
                   Keep Separate
                 </Button>
@@ -202,9 +203,14 @@ export default function ReviewPage() {
       );
     }
 
-    if (item.type === "category") {
+    if (type === "category") {
+      const tx = item.transaction;
+      const suggested = item.suggestedAction as Record<string, unknown> | null;
+      const suggestedCategoryName = (suggested?.categoryName as string) || "Suggested";
+      const currentCategoryName = tx?.category?.name || "Uncategorized";
+      const confidence = suggested?.confidence as number | undefined;
       return (
-        <Card key={item.id} className={cn(item.status === "resolved" && "opacity-60")}>
+        <Card key={item.id} className={cn(!isPending && "opacity-60")}>
           <CardContent className="pt-6">
             <div className="flex items-start gap-3 mb-3">
               <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center shrink-0">
@@ -215,31 +221,35 @@ export default function ReviewPage() {
                   Category Suggestion
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                  <span className="font-medium">{item.transaction?.merchant}</span> &middot;{" "}
-                  {formatCurrency(item.transaction?.amount ?? 0)} &middot; {item.transaction?.date}
+                  <span className="font-medium">{tx?.merchant?.name || "Unknown"}</span> &middot;{" "}
+                  {formatCurrency(Number(tx?.amount ?? 0))} &middot;{" "}
+                  {tx?.transactionDate ? new Date(tx.transactionDate).toLocaleDateString() : ""}
                 </p>
                 <div className="flex items-center gap-2 mt-2 text-sm">
                   <Badge variant="outline" className="text-xs">
-                    {item.currentCategory}
+                    {currentCategoryName}
                   </Badge>
                   <span className="text-gray-400">&rarr;</span>
                   <Badge className="text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
-                    {item.suggestedCategory}
+                    {suggestedCategoryName}
                   </Badge>
-                  <span className="text-xs text-gray-500">
-                    ({item.categoryConfidence}% confidence)
-                  </span>
+                  {confidence != null && (
+                    <span className="text-xs text-gray-500">
+                      ({confidence}% confidence)
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
 
-            {item.status === "pending" && (
+            {isPending && (
               <div className="flex items-center gap-2 mt-3">
-                <Button size="sm" onClick={() => resolve(item.id)}>
+                <Button size="sm" onClick={() => resolve(item.id, "accept_category")} disabled={isResolving}>
+                  {isResolving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
                   Accept
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => resolve(item.id)}>
-                  Choose Category
+                <Button variant="outline" size="sm" onClick={() => resolve(item.id, "dismiss")} disabled={isResolving}>
+                  Dismiss
                 </Button>
               </div>
             )}
@@ -248,9 +258,11 @@ export default function ReviewPage() {
       );
     }
 
-    if (item.type === "merchant") {
+    if (type === "merchant") {
+      const suggested = item.suggestedAction as Record<string, unknown> | null;
+      const merchantName = item.description || item.transaction?.merchant?.name || "Unknown";
       return (
-        <Card key={item.id} className={cn(item.status === "resolved" && "opacity-60")}>
+        <Card key={item.id} className={cn(!isPending && "opacity-60")}>
           <CardContent className="pt-6">
             <div className="flex items-start gap-3 mb-3">
               <div className="w-8 h-8 rounded-lg bg-purple-50 dark:bg-purple-900/20 flex items-center justify-center shrink-0">
@@ -262,24 +274,25 @@ export default function ReviewPage() {
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                   <code className="bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-xs">
-                    {item.merchantName}
+                    {merchantName}
                   </code>
                 </p>
-                {item.suggestedAction && (
+                {suggested?.suggestedMerchantName && (
                   <p className="text-xs text-gray-500 mt-1">
-                    Suggestion: {item.suggestedAction}
+                    Suggestion: Map to {suggested.suggestedMerchantName as string}
                   </p>
                 )}
               </div>
             </div>
 
-            {item.status === "pending" && (
+            {isPending && (
               <div className="flex items-center gap-2 mt-3">
-                <Button size="sm" onClick={() => resolve(item.id)}>
+                <Button size="sm" onClick={() => resolve(item.id, "accept_category")} disabled={isResolving}>
+                  {isResolving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
                   Accept Suggestion
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => resolve(item.id)}>
-                  Set Manually
+                <Button variant="outline" size="sm" onClick={() => resolve(item.id, "dismiss")} disabled={isResolving}>
+                  Dismiss
                 </Button>
               </div>
             )}
@@ -349,7 +362,7 @@ export default function ReviewPage() {
               refunds: "refund",
             };
             const filtered =
-              tab === "all" ? pending : pending.filter((i) => i.type === typeMap[tab]);
+              tab === "all" ? pending : pending.filter((i) => normalizedType(i) === typeMap[tab]);
 
             return (
               <TabsContent key={tab} value={tab} className="space-y-4 mt-6">
