@@ -445,24 +445,25 @@ export async function POST(request: NextRequest) {
   }
 
   const sql = neon(connectionString);
+  const exec = (stmt: string) => sql(Object.assign([stmt], { raw: [stmt] }) as unknown as TemplateStringsArray);
   const results: string[] = [];
 
   try {
     results.push("Creating enums and tables...");
     for (const stmt of splitStatements(MIGRATION_SQL)) {
-      await sql(stmt);
+      await exec(stmt);
     }
     results.push("Tables created.");
 
     results.push("Creating indexes...");
     for (const stmt of splitStatements(INDEXES_SQL)) {
-      await sql(stmt);
+      await exec(stmt);
     }
     results.push("Indexes created.");
 
     results.push("Creating foreign keys...");
     for (const stmt of splitStatements(FOREIGN_KEYS_SQL)) {
-      await sql(stmt);
+      await exec(stmt);
     }
     results.push("Foreign keys created.");
 
