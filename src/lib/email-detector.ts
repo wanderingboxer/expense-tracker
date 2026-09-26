@@ -98,12 +98,15 @@ const REFERENCE_PATTERNS = [
   /order\s*(?:id|no|number)[\s:#]*[A-Z0-9]+/i,
 ];
 
-interface EmailForScoring {
+export interface EmailForScoring {
   sender: string;
   senderDomain: string;
   subject: string;
   bodyText: string;
 }
+
+const TRANSACTIONAL_VERB_PATTERN =
+  /\b(?:debited|credited|debited from|credited to|has been (?:debited|credited)|withdrawn|transferred)\b/i;
 
 export function calculateRelevanceScore(email: EmailForScoring): number {
   let score = 0;
@@ -150,6 +153,30 @@ export function calculateRelevanceScore(email: EmailForScoring): number {
   return Math.max(0, Math.min(100, score));
 }
 
-export function isFinancialEmail(score: number, threshold = 20): boolean {
-  return score >= threshold;
+/**
+ * Domain trust alone is not a safe classifier here: the Gmail search query
+ * already restricts results to a known bank sender, so EVERY scanned email
+ * already gets the +30 domain bonus and clears a bare score>=20 threshold —
+ * including genuine promotional/marketing emails the bank also sends from
+ * that same address (rate updates, partner cross-promotions), which then
+ * get run through the transaction parser and produce garbage "transactions"
+ * with merchant names lifted from ad copy. Require the email to actually
+ * look like a money-movement notification: a currency amount, plus at
+ * least one of a payment-method mention, a reference/UTR number, or an
+ * explicit debit/credit verb.
+ */
+export function isFinancialEmail(
+  email: EmailForScoring,
+  score: number,
+  threshold = 20
+): boolean {
+  if (score < threshold) return false;
+
+  const combined = `${email.subject.toLowerCase()} ${email.bodyText.toLowerCase()}`;
+  const hasCurrency = CURRENCY_PATTERN.test(combined);
+  const hasPaymentSignal = PAYMENT_METHOD_KEYWORDS.some((kw) => combined.includes(kw));
+  const hasReference = REFERENCE_PATTERNS.some((p) => p.test(combined));
+  const hasTransactionalVerb = TRANSACTIONAL_VERB_PATTERN.test(combined);
+
+  return hasCurrency && (hasPaymentSignal || hasReference || hasTransactionalVerb);
 }

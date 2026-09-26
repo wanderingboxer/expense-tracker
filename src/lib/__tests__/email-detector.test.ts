@@ -1,4 +1,4 @@
-import { calculateRelevanceScore, KNOWN_FINANCIAL_DOMAINS } from "@/lib/email-detector";
+import { calculateRelevanceScore, isFinancialEmail, KNOWN_FINANCIAL_DOMAINS } from "@/lib/email-detector";
 import { HDFC_SENDER_QUERY } from "@/lib/gmail";
 
 describe("sender/domain consistency", () => {
@@ -61,5 +61,50 @@ describe("calculateRelevanceScore", () => {
       bodyText: "Payment of ₹450 received for order #12345. Transaction ID: SWG789012",
     });
     expect(score).toBeGreaterThan(60);
+  });
+});
+
+describe("isFinancialEmail", () => {
+  it("accepts a real HDFC UPI debit alert", () => {
+    const email = {
+      sender: "alerts@hdfcbank.bank.in",
+      senderDomain: "hdfcbank.bank.in",
+      subject: "Transaction alert",
+      bodyText:
+        "Rs.60.00 is debited from your account ending 4781 towards VPA test@ybl (Test Merchant) on 26-09-26. UPI transaction reference no.: 489172985779.",
+    };
+    const score = calculateRelevanceScore(email);
+    expect(isFinancialEmail(email, score)).toBe(true);
+  });
+
+  it("rejects a promotional/cross-sell email from the same trusted bank domain that happens to mention a number", () => {
+    // Regression guard for the exact bug reported: since the Gmail search
+    // query already restricts to a known bank sender, every scanned email
+    // gets the domain trust bonus regardless of content. A marketing email
+    // mentioning an unrelated number (a rate, a discount, an ad headline)
+    // must not be classified as a transaction just because it cleared the
+    // bare score threshold on domain trust alone.
+    const email = {
+      sender: "offers@hdfcbank.bank.in",
+      senderDomain: "hdfcbank.bank.in",
+      subject: "300 Million Wix Businesses. You Have.",
+      bodyText:
+        "The rates published today start from just $1.00 a month. Build your business website now.",
+    };
+    const score = calculateRelevanceScore(email);
+    expect(isFinancialEmail(email, score)).toBe(false);
+  });
+
+  it("rejects a promotional email even when the score alone would pass threshold", () => {
+    const email = {
+      sender: "alerts@hdfcbank.bank.in",
+      senderDomain: "hdfcbank.bank.in",
+      subject: "The Rates Published",
+      bodyText: "New home loan rates published starting at 8.5%. Apply today.",
+    };
+    const score = calculateRelevanceScore(email);
+    // Domain alone (+30) already clears the bare threshold (20).
+    expect(score).toBeGreaterThanOrEqual(20);
+    expect(isFinancialEmail(email, score)).toBe(false);
   });
 });

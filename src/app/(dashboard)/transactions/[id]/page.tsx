@@ -71,9 +71,10 @@ type ApiTransaction = {
     matchReasons: string[];
     financialEmail: {
       id: string;
-      senderEmail: string;
-      subject: string;
+      sender: string;
+      subject: string | null;
       receivedAt: string;
+      gmailMessageId: string;
     };
   }[];
   linkedTransaction: {
@@ -379,29 +380,35 @@ export default function TransactionDetailPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             {tx.evidence.map((ev) => (
-              <div
+              <a
                 key={ev.id}
-                className="rounded-lg border border-gray-200 dark:border-gray-700 p-4"
+                href={`https://mail.google.com/mail/u/0/#all/${ev.financialEmail.gmailMessageId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block rounded-lg border border-border p-4 hover:bg-accent/50 transition-colors"
               >
                 <div className="flex items-start gap-3">
-                  <Mail className="w-4 h-4 text-gray-400 mt-1 shrink-0" />
+                  <Mail className="w-4 h-4 text-muted-foreground mt-1 shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                      {ev.financialEmail.subject}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      From: {ev.financialEmail.senderEmail} &middot;{" "}
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-foreground truncate">
+                        {ev.financialEmail.subject || "(no subject)"}
+                      </p>
+                      <ExternalLink className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      From: {ev.financialEmail.sender} &middot;{" "}
                       {formatDate(ev.financialEmail.receivedAt)}
                     </p>
                     <div className="flex items-center gap-2 mt-2">
-                      <span className="text-xs text-gray-500">Confidence:</span>
+                      <span className="text-xs text-muted-foreground">Confidence:</span>
                       <Progress value={ev.matchConfidence} className="h-1.5 w-20" />
                       <span className="text-xs font-medium">{Math.round(ev.matchConfidence)}%</span>
                     </div>
                     {Array.isArray(ev.matchReasons) && ev.matchReasons.length > 0 && (
                       <div className="mt-2 space-y-1">
                         {ev.matchReasons.map((reason, i) => (
-                          <p key={i} className="text-xs text-gray-500 flex items-center gap-1">
+                          <p key={i} className="text-xs text-muted-foreground flex items-center gap-1">
                             <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
                             {reason}
                           </p>
@@ -410,7 +417,7 @@ export default function TransactionDetailPage() {
                     )}
                   </div>
                 </div>
-              </div>
+              </a>
             ))}
           </CardContent>
         </Card>

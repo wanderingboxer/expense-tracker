@@ -442,7 +442,7 @@ export async function processSingleEmail(
   };
 
   const relevanceScore = calculateRelevanceScore(emailData);
-  const financial = isFinancialEmail(relevanceScore);
+  const financial = isFinancialEmail(emailData, relevanceScore);
 
   // Store the email record
   const financialEmail = await prisma.financialEmail.create({
