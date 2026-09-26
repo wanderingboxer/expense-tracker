@@ -1,12 +1,15 @@
 import { prisma } from "@/lib/prisma";
 import { SyncStatus, CandidateStatus, TransactionType } from "@/generated/prisma/enums";
+import type { gmail_v1 } from "googleapis";
 import {
   getGmailClient,
   getUpdatedAccessToken,
   buildFinancialSearchQuery,
+  buildFinancialSearchQueryAfterDate,
   searchFinancialEmails,
   getMessage,
   getHistoryChanges,
+  HistoryExpiredError,
   type ParsedMessage,
 } from "@/lib/gmail";
 import {
@@ -18,7 +21,6 @@ import { findOrCreateMerchant } from "@/lib/merchant-normalizer";
 import {
   findMatchingTransaction,
   mergeIntoTransaction,
-  AUTO_MERGE_THRESHOLD,
   REVIEW_THRESHOLD,
 } from "@/lib/deduplication";
 import { categorizeTransaction } from "@/lib/categorizer";
@@ -42,90 +44,202 @@ interface ImportStats {
   candidatesCreated: number;
   duplicatesMerged: number;
   reviewItems: number;
+  failedMessages: number;
+  firstErrorMessage?: string;
+  partial: boolean;
 }
 
-export async function processGmailImport(
-  userId: string
-): Promise<ImportStats> {
-  const stats: ImportStats = {
+function emptyStats(): ImportStats {
+  return {
     totalScanned: 0,
     financialFound: 0,
     candidatesCreated: 0,
     duplicatesMerged: 0,
     reviewItems: 0,
+    failedMessages: 0,
+    partial: false,
   };
+}
 
-  const connection = await prisma.gmailConnection.findUnique({
-    where: { userId },
-  });
-
-  if (!connection) {
-    throw new Error("Gmail connection not found for user");
+/** Thrown when a sync is already running for this account (manual sync and
+ * cron sync raced, or a prior invocation is still in flight). Callers should
+ * treat this as "try again shortly," not a hard failure. */
+export class SyncInProgressError extends Error {
+  constructor() {
+    super("A sync is already in progress for this account");
+    this.name = "SyncInProgressError";
   }
+}
 
-  await prisma.gmailConnection.update({
-    where: { id: connection.id },
+const DEFAULT_LOOKBACK_DAYS = 180;
+// Bounds how many pages a single invocation processes, so a Vercel-timeout
+// limited run yields control (saving resume state) instead of restarting
+// from scratch next time.
+const MAX_PAGES_PER_RUN = 5;
+
+interface ResumeState {
+  query: string;
+  pageToken?: string;
+}
+
+/** Atomically claims the sync lock. Returns false if another run already
+ * holds it (`syncStatus === SYNCING`), so callers never run concurrently. */
+async function acquireSyncLock(connectionId: string): Promise<boolean> {
+  const result = await prisma.gmailConnection.updateMany({
+    where: { id: connectionId, syncStatus: { not: SyncStatus.SYNCING } },
     data: { syncStatus: SyncStatus.SYNCING, errorMessage: null },
   });
+  return result.count > 0;
+}
 
-  try {
-    const { gmail, auth } = getGmailClient(connection.accessToken, connection.refreshToken);
-    const MAX_PAGES = 3;
-    let pageToken: string | undefined;
-    let pageCount = 0;
+async function runPagedImport(
+  userId: string,
+  gmail: gmail_v1.Gmail,
+  query: string,
+  startPageToken: string | undefined,
+  stats: ImportStats
+): Promise<{ remainingPageToken?: string }> {
+  let pageToken = startPageToken;
+  let pageCount = 0;
 
-    do {
-      const { messageIds, nextPageToken } = await searchFinancialEmails(
-        gmail,
-        buildFinancialSearchQuery(1),
-        pageToken
-      );
+  do {
+    const { messageIds, nextPageToken } = await searchFinancialEmails(
+      gmail,
+      query,
+      pageToken
+    );
 
-      for (const messageId of messageIds) {
-        stats.totalScanned++;
+    for (const messageId of messageIds) {
+      stats.totalScanned++;
 
-        const existing = await prisma.financialEmail.findUnique({
-          where: { gmailMessageId: messageId },
-        });
-        if (existing) continue;
+      const existing = await prisma.financialEmail.findUnique({
+        where: { gmailMessageId: messageId },
+      });
+      if (existing) continue;
 
-        try {
-          const messageData = await getMessage(gmail, messageId);
-          const result = await processSingleEmail(userId, messageId, messageData);
+      try {
+        const messageData = await getMessage(gmail, messageId);
+        const result = await processSingleEmail(userId, messageId, messageData);
 
-          if (result.isFinancial) stats.financialFound++;
-          if (result.candidateCreated) stats.candidatesCreated++;
-          if (result.duplicateMerged) stats.duplicatesMerged++;
-          if (result.reviewCreated) stats.reviewItems++;
-        } catch (err) {
-          console.error(`Error processing message ${messageId}:`, err);
-        }
+        if (result.isFinancial) stats.financialFound++;
+        if (result.candidateCreated) stats.candidatesCreated++;
+        if (result.duplicateMerged) stats.duplicatesMerged++;
+        if (result.reviewCreated) stats.reviewItems++;
+      } catch (err) {
+        stats.failedMessages++;
+        const message = err instanceof Error ? err.message : String(err);
+        if (!stats.firstErrorMessage) stats.firstErrorMessage = message;
+        console.error(`Error processing message ${messageId}:`, err);
       }
+    }
 
-      pageToken = nextPageToken;
-      pageCount++;
-    } while (pageToken && pageCount < MAX_PAGES);
+    pageToken = nextPageToken;
+    pageCount++;
+  } while (pageToken && pageCount < MAX_PAGES_PER_RUN);
 
-    // Get current profile for historyId
-    const profile = await gmail.users.getProfile({ userId: "me" });
+  return { remainingPageToken: pageToken };
+}
 
-    // Persist refreshed access token if it changed
-    const updatedToken = getUpdatedAccessToken(auth);
-    const tokenUpdate = updatedToken && updatedToken !== connection.accessToken
+/** Persists the outcome of a paged import run: either resume state (more
+ * pages remain — sync is not "done" yet, `lastSyncAt` is not updated) or
+ * completion (fetches the current Gmail `historyId` for future incremental
+ * syncs and stamps `lastSyncAt`). */
+async function finishImportRun(
+  connection: { id: string; accessToken: string },
+  gmail: gmail_v1.Gmail,
+  auth: Parameters<typeof getUpdatedAccessToken>[0],
+  query: string,
+  remainingPageToken: string | undefined,
+  stats: ImportStats
+): Promise<void> {
+  const updatedToken = getUpdatedAccessToken(auth);
+  const tokenUpdate =
+    updatedToken && updatedToken !== connection.accessToken
       ? { accessToken: updatedToken }
       : {};
 
+  if (remainingPageToken) {
+    stats.partial = true;
     await prisma.gmailConnection.update({
       where: { id: connection.id },
       data: {
         syncStatus: SyncStatus.IDLE,
-        lastSyncAt: new Date(),
-        historyId: profile.data.historyId
-          ? BigInt(profile.data.historyId)
-          : undefined,
+        nextPageToken: JSON.stringify({
+          query,
+          pageToken: remainingPageToken,
+        } satisfies ResumeState),
+        lastSyncErrorCount: stats.failedMessages,
+        errorMessage: stats.firstErrorMessage ?? null,
         ...tokenUpdate,
       },
     });
+    return;
+  }
+
+  const profile = await gmail.users.getProfile({ userId: "me" });
+  await prisma.gmailConnection.update({
+    where: { id: connection.id },
+    data: {
+      syncStatus: SyncStatus.IDLE,
+      lastSyncAt: new Date(),
+      nextPageToken: null,
+      historyId: profile.data.historyId
+        ? BigInt(profile.data.historyId)
+        : undefined,
+      lastSyncErrorCount: stats.failedMessages,
+      errorMessage: stats.firstErrorMessage ?? null,
+      ...tokenUpdate,
+    },
+  });
+}
+
+export async function processGmailImport(
+  userId: string,
+  options?: { sinceDate?: Date }
+): Promise<ImportStats> {
+  const stats = emptyStats();
+
+  const connection = await prisma.gmailConnection.findUnique({
+    where: { userId },
+  });
+  if (!connection) {
+    throw new Error("Gmail connection not found for user");
+  }
+
+  const locked = await acquireSyncLock(connection.id);
+  if (!locked) throw new SyncInProgressError();
+
+  try {
+    const { gmail, auth } = getGmailClient(
+      connection.accessToken,
+      connection.refreshToken
+    );
+
+    let query: string;
+    let pageToken: string | undefined;
+
+    if (connection.nextPageToken) {
+      // Resuming a run that yielded control mid-pagination last time.
+      const resume = JSON.parse(connection.nextPageToken) as ResumeState;
+      query = resume.query;
+      pageToken = resume.pageToken;
+    } else if (options?.sinceDate) {
+      query = buildFinancialSearchQueryAfterDate(options.sinceDate);
+    } else {
+      const lookbackDays =
+        Number(process.env.SYNC_LOOKBACK_DAYS) || DEFAULT_LOOKBACK_DAYS;
+      query = buildFinancialSearchQuery(lookbackDays);
+    }
+
+    const { remainingPageToken } = await runPagedImport(
+      userId,
+      gmail,
+      query,
+      pageToken,
+      stats
+    );
+
+    await finishImportRun(connection, gmail, auth, query, remainingPageToken, stats);
   } catch (error) {
     await prisma.gmailConnection.update({
       where: { id: connection.id },
@@ -144,38 +258,60 @@ export async function processGmailImport(
 export async function processIncrementalSync(
   userId: string
 ): Promise<ImportStats> {
-  const stats: ImportStats = {
-    totalScanned: 0,
-    financialFound: 0,
-    candidatesCreated: 0,
-    duplicatesMerged: 0,
-    reviewItems: 0,
-  };
+  const stats = emptyStats();
 
   const connection = await prisma.gmailConnection.findUnique({
     where: { userId },
   });
-
   if (!connection) {
     throw new Error("Gmail connection not found for user");
   }
 
   if (!connection.historyId) {
-    // No historyId, do full import instead
+    // No historyId yet (first-ever sync) — do a full import instead.
     return processGmailImport(userId);
   }
 
-  await prisma.gmailConnection.update({
-    where: { id: connection.id },
-    data: { syncStatus: SyncStatus.SYNCING, errorMessage: null },
-  });
+  const locked = await acquireSyncLock(connection.id);
+  if (!locked) throw new SyncInProgressError();
 
   try {
-    const { gmail, auth } = getGmailClient(connection.accessToken, connection.refreshToken);
-    const { addedMessageIds } = await getHistoryChanges(
-      gmail,
-      connection.historyId.toString()
+    const { gmail, auth } = getGmailClient(
+      connection.accessToken,
+      connection.refreshToken
     );
+
+    let addedMessageIds: string[];
+    try {
+      const result = await getHistoryChanges(
+        gmail,
+        connection.historyId.toString()
+      );
+      addedMessageIds = result.addedMessageIds;
+    } catch (error) {
+      if (error instanceof HistoryExpiredError) {
+        // Gmail expires history after ~7 days. Fall back to a bounded full
+        // resync since the last successful sync (not the full lookback
+        // window) — we already hold the lock, so this reuses the same
+        // paged-import path directly instead of re-entering
+        // processGmailImport (which would try to acquire the lock again).
+        const sinceDate =
+          connection.lastSyncAt ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const query = buildFinancialSearchQueryAfterDate(sinceDate);
+        stats.firstErrorMessage = "Gmail history expired; ran a bounded full resync instead";
+
+        const { remainingPageToken } = await runPagedImport(
+          userId,
+          gmail,
+          query,
+          undefined,
+          stats
+        );
+        await finishImportRun(connection, gmail, auth, query, remainingPageToken, stats);
+        return stats;
+      }
+      throw error;
+    }
 
     for (const messageId of addedMessageIds) {
       stats.totalScanned++;
@@ -194,17 +330,19 @@ export async function processIncrementalSync(
         if (result.duplicateMerged) stats.duplicatesMerged++;
         if (result.reviewCreated) stats.reviewItems++;
       } catch (err) {
+        stats.failedMessages++;
+        const message = err instanceof Error ? err.message : String(err);
+        if (!stats.firstErrorMessage) stats.firstErrorMessage = message;
         console.error(`Error processing message ${messageId}:`, err);
       }
     }
 
     const profile = await gmail.users.getProfile({ userId: "me" });
-
-    // Persist refreshed access token if it changed
     const updatedToken = getUpdatedAccessToken(auth);
-    const tokenUpdate = updatedToken && updatedToken !== connection.accessToken
-      ? { accessToken: updatedToken }
-      : {};
+    const tokenUpdate =
+      updatedToken && updatedToken !== connection.accessToken
+        ? { accessToken: updatedToken }
+        : {};
 
     await prisma.gmailConnection.update({
       where: { id: connection.id },
@@ -214,6 +352,8 @@ export async function processIncrementalSync(
         historyId: profile.data.historyId
           ? BigInt(profile.data.historyId)
           : undefined,
+        lastSyncErrorCount: stats.failedMessages,
+        errorMessage: stats.firstErrorMessage ?? null,
         ...tokenUpdate,
       },
     });
@@ -328,7 +468,7 @@ export async function processSingleEmail(
   // Deduplication check
   const match = await findMatchingTransaction(userId, parsed);
 
-  if (match && match.score >= AUTO_MERGE_THRESHOLD) {
+  if (match && match.qualifiesForAutoMerge) {
     // Auto-merge
     await mergeIntoTransaction(match.transactionId, financialEmail.id, match.reasons);
     await prisma.transactionCandidate.update({

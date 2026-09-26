@@ -1,4 +1,15 @@
-import { calculateRelevanceScore } from "@/lib/email-detector";
+import { calculateRelevanceScore, KNOWN_FINANCIAL_DOMAINS } from "@/lib/email-detector";
+import { HDFC_SENDER_QUERY } from "@/lib/gmail";
+
+describe("sender/domain consistency", () => {
+  it("the Gmail sync sender's domain is present in KNOWN_FINANCIAL_DOMAINS", () => {
+    const senderDomain = HDFC_SENDER_QUERY.split("@")[1];
+    expect(senderDomain).toBeTruthy();
+    expect(
+      KNOWN_FINANCIAL_DOMAINS.some((d) => senderDomain?.includes(d) || d.includes(senderDomain ?? ""))
+    ).toBe(true);
+  });
+});
 
 describe("calculateRelevanceScore", () => {
   it("scores bank email with financial content high (>60)", () => {

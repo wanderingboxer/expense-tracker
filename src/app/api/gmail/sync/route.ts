@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { processGmailImport, processIncrementalSync } from "@/lib/ingestion";
+import {
+  processGmailImport,
+  processIncrementalSync,
+  SyncInProgressError,
+} from "@/lib/ingestion";
 
 export async function POST() {
   try {
@@ -25,6 +29,9 @@ export async function POST() {
 
     return NextResponse.json({ success: true, stats });
   } catch (error) {
+    if (error instanceof SyncInProgressError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     console.error("POST /api/gmail/sync error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
@@ -45,7 +52,13 @@ export async function DELETE() {
     await prisma.financialEmail.deleteMany({ where: { userId } });
     await prisma.gmailConnection.updateMany({
       where: { userId },
-      data: { historyId: null, lastSyncAt: null },
+      data: {
+        historyId: null,
+        lastSyncAt: null,
+        nextPageToken: null,
+        lastSyncErrorCount: null,
+        errorMessage: null,
+      },
     });
 
     return NextResponse.json({ success: true, message: "All sync data cleared" });
@@ -64,7 +77,14 @@ export async function GET() {
 
     const connection = await prisma.gmailConnection.findUnique({
       where: { userId: session.user.id },
-      select: { lastSyncAt: true, syncStatus: true, historyId: true, errorMessage: true },
+      select: {
+        lastSyncAt: true,
+        syncStatus: true,
+        historyId: true,
+        errorMessage: true,
+        lastSyncErrorCount: true,
+        nextPageToken: true,
+      },
     });
 
     if (!connection) {
@@ -77,6 +97,8 @@ export async function GET() {
       syncStatus: connection.syncStatus,
       historyId: connection.historyId?.toString() ?? null,
       errorMessage: connection.errorMessage,
+      lastSyncErrorCount: connection.lastSyncErrorCount ?? 0,
+      syncIncomplete: connection.nextPageToken != null,
     });
   } catch (error) {
     console.error("GET /api/gmail/sync error:", error);

@@ -70,17 +70,28 @@ export function getUpdatedAccessToken(
   return auth.credentials.access_token ?? null;
 }
 
+export const HDFC_SENDER_QUERY = "from:alerts@hdfcbank.bank.in";
+
+function formatAfterDate(date: Date): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}/${mm}/${dd}`;
+}
+
 export function buildFinancialSearchQuery(afterDays?: number): string {
-  const query = "from:alerts@hdfcbank.bank.in";
   if (afterDays) {
     const d = new Date();
     d.setDate(d.getDate() - afterDays);
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${query} after:${yyyy}/${mm}/${dd}`;
+    return `${HDFC_SENDER_QUERY} after:${formatAfterDate(d)}`;
   }
-  return query;
+  return HDFC_SENDER_QUERY;
+}
+
+/** Bound the search to messages received on/after an exact date (e.g. the
+ * connection's `lastSyncAt`), rather than a relative "N days ago" window. */
+export function buildFinancialSearchQueryAfterDate(date: Date): string {
+  return `${HDFC_SENDER_QUERY} after:${formatAfterDate(date)}`;
 }
 
 export async function searchFinancialEmails(
@@ -138,6 +149,23 @@ export async function getMessage(
   };
 }
 
+/**
+ * Thrown when Gmail reports that `startHistoryId` is too old (history is
+ * only retained for ~7 days). Callers should fall back to a bounded full
+ * resync instead of treating this as a fatal sync error.
+ */
+export class HistoryExpiredError extends Error {
+  constructor(message = "Gmail history ID has expired") {
+    super(message);
+    this.name = "HistoryExpiredError";
+  }
+}
+
+function isHistoryExpiredError(error: unknown): boolean {
+  const err = error as { code?: number; response?: { status?: number } };
+  return err?.code === 404 || err?.response?.status === 404;
+}
+
 export async function getHistoryChanges(
   gmail: gmail_v1.Gmail,
   startHistoryId: string
@@ -146,12 +174,20 @@ export async function getHistoryChanges(
   let pageToken: string | undefined;
 
   do {
-    const response = await gmail.users.history.list({
-      userId: "me",
-      startHistoryId,
-      historyTypes: ["messageAdded"],
-      pageToken,
-    });
+    let response;
+    try {
+      response = await gmail.users.history.list({
+        userId: "me",
+        startHistoryId,
+        historyTypes: ["messageAdded"],
+        pageToken,
+      });
+    } catch (error) {
+      if (isHistoryExpiredError(error)) {
+        throw new HistoryExpiredError();
+      }
+      throw error;
+    }
 
     const histories = response.data.history ?? [];
     for (const history of histories) {

@@ -1,4 +1,4 @@
-import { calculateMatchScore } from "@/lib/deduplication";
+import { calculateMatchScore, qualifiesForAutoMerge, AUTO_MERGE_THRESHOLD } from "@/lib/deduplication";
 import type { TransactionCandidateData } from "@/lib/parser";
 
 function makeCandidate(overrides: Partial<TransactionCandidateData> = {}): TransactionCandidateData {
@@ -72,5 +72,69 @@ describe("calculateMatchScore", () => {
     });
     const { score } = calculateMatchScore(a, b);
     expect(score).toBeGreaterThanOrEqual(85);
+  });
+});
+
+describe("qualifiesForAutoMerge", () => {
+  it("qualifies on a real exact-UTR-match transaction pair (score naturally clears threshold)", () => {
+    const date = new Date("2026-08-16");
+    const a = makeCandidate({
+      utr: "HDFC1234567890",
+      amount: 1000,
+      merchantRaw: "Swiggy",
+      transactionDate: date,
+      transactionTime: "14:30",
+    });
+    const b = makeCandidate({
+      utr: "HDFC1234567890",
+      amount: 1000,
+      merchantRaw: "Swiggy",
+      transactionDate: date,
+      transactionTime: "14:32",
+    });
+    const result = calculateMatchScore(a, b);
+    expect(result.score).toBeGreaterThanOrEqual(AUTO_MERGE_THRESHOLD);
+    expect(qualifiesForAutoMerge(result)).toBe(true);
+  });
+
+  it("qualifies when score clears threshold and merchant+payment-method both match (direct guard check)", () => {
+    // Note: with current point weights, 90+ is only reachable via a ref
+    // match in practice (max score without one is 65) — this exercises the
+    // guard function directly so the merchant+payment-method branch stays
+    // covered even if scoring weights change later.
+    const highScoreMerchantMatch = {
+      score: 92,
+      reasons: ["Same merchant", "Same payment method"],
+      hasExactRefMatch: false,
+      sameMerchant: true,
+      samePaymentMethod: true,
+    };
+    expect(qualifiesForAutoMerge(highScoreMerchantMatch)).toBe(true);
+  });
+
+  it("refuses to auto-merge on score alone without a ref match or merchant match", () => {
+    // With the current point weights, hitting AUTO_MERGE_THRESHOLD (90)
+    // already requires an exact UTR/reference match in practice — but this
+    // directly tests the guard function itself, so it stays a safety net
+    // even if scoring weights change later.
+    const highScoreNoRefNoMerchant = {
+      score: 95,
+      reasons: ["Same amount and currency", "Same date", "Time within 5 minutes"],
+      hasExactRefMatch: false,
+      sameMerchant: false,
+      samePaymentMethod: true,
+    };
+    expect(qualifiesForAutoMerge(highScoreNoRefNoMerchant)).toBe(false);
+  });
+
+  it("refuses to auto-merge below the score threshold even with a ref match", () => {
+    const lowScoreWithRef = {
+      score: 50,
+      reasons: ["Exact UTR match"],
+      hasExactRefMatch: true,
+      sameMerchant: false,
+      samePaymentMethod: false,
+    };
+    expect(qualifiesForAutoMerge(lowScoreWithRef)).toBe(false);
   });
 });

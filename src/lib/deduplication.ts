@@ -8,12 +8,27 @@ export const REVIEW_THRESHOLD = 55;
 export interface MatchResult {
   score: number;
   reasons: string[];
+  hasExactRefMatch: boolean;
+  sameMerchant: boolean;
+  samePaymentMethod: boolean;
 }
 
 export interface TransactionMatch {
   transactionId: string;
   score: number;
   reasons: string[];
+  qualifiesForAutoMerge: boolean;
+}
+
+/** Score-threshold alone isn't a safe auto-merge signal: two distinct
+ * same-amount transactions from the same window can hit 90+ on
+ * amount+date+time+payment-method coincidence alone. Require the
+ * highest-confidence signal (an exact UTR/reference match) or a strong
+ * secondary combination (same merchant AND same payment method) in
+ * addition to the score. */
+export function qualifiesForAutoMerge(match: MatchResult): boolean {
+  if (match.score < AUTO_MERGE_THRESHOLD) return false;
+  return match.hasExactRefMatch || (match.sameMerchant && match.samePaymentMethod);
 }
 
 export function calculateMatchScore(
@@ -22,11 +37,15 @@ export function calculateMatchScore(
 ): MatchResult {
   let score = 0;
   const reasons: string[] = [];
+  let hasExactRefMatch = false;
+  let sameMerchant = false;
+  let samePaymentMethod = false;
 
   // Exact UTR/reference match: +50
   if (a.utr && b.utr && a.utr === b.utr) {
     score += 50;
     reasons.push("Exact UTR match");
+    hasExactRefMatch = true;
   } else if (
     a.referenceNumber &&
     b.referenceNumber &&
@@ -34,6 +53,7 @@ export function calculateMatchScore(
   ) {
     score += 50;
     reasons.push("Exact reference number match");
+    hasExactRefMatch = true;
   }
 
   // Same amount: +20
@@ -49,6 +69,7 @@ export function calculateMatchScore(
     if (normA === normB) {
       score += 15;
       reasons.push("Same merchant");
+      sameMerchant = true;
     }
   }
 
@@ -81,6 +102,7 @@ export function calculateMatchScore(
   if (a.paymentMethod === b.paymentMethod && a.paymentMethod !== "UNKNOWN") {
     score += 5;
     reasons.push("Same payment method");
+    samePaymentMethod = true;
   }
 
   // Same account/card: +5
@@ -92,7 +114,7 @@ export function calculateMatchScore(
     reasons.push("Same account/card");
   }
 
-  return { score, reasons };
+  return { score, reasons, hasExactRefMatch, sameMerchant, samePaymentMethod };
 }
 
 export async function findMatchingTransaction(
@@ -139,10 +161,15 @@ export async function findMatchingTransaction(
       confidence: tx.confidence ?? 0,
     };
 
-    const { score, reasons } = calculateMatchScore(candidate, txAsCandidate);
+    const matchResult = calculateMatchScore(candidate, txAsCandidate);
 
-    if (!bestMatch || score > bestMatch.score) {
-      bestMatch = { transactionId: tx.id, score, reasons };
+    if (!bestMatch || matchResult.score > bestMatch.score) {
+      bestMatch = {
+        transactionId: tx.id,
+        score: matchResult.score,
+        reasons: matchResult.reasons,
+        qualifiesForAutoMerge: qualifiesForAutoMerge(matchResult),
+      };
     }
   }
 

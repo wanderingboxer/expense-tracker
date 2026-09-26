@@ -96,6 +96,7 @@ enum ReviewType {
   POSSIBLE_REFUND
   UNKNOWN_TYPE
   LOW_CONFIDENCE
+  POSSIBLE_SUBSCRIPTION
 }
 
 enum ReviewStatus {
@@ -181,17 +182,19 @@ model VerificationToken {
 // ─── Gmail Integration ───────────────────────────────────────────────────────
 
 model GmailConnection {
-  id           String     @id @default(uuid())
-  userId       String     @unique
-  email        String
-  accessToken  String     @db.Text
-  refreshToken String     @db.Text
-  historyId    BigInt?
-  lastSyncAt   DateTime?
-  syncStatus   SyncStatus @default(IDLE)
-  errorMessage String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id                String     @id @default(uuid())
+  userId            String     @unique
+  email             String
+  accessToken       String     @db.Text
+  refreshToken      String     @db.Text
+  historyId         BigInt?
+  lastSyncAt        DateTime?
+  syncStatus        SyncStatus @default(IDLE)
+  errorMessage      String?
+  nextPageToken     String?
+  lastSyncErrorCount Int?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
