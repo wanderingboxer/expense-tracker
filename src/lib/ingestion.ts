@@ -73,7 +73,13 @@ export class SyncInProgressError extends Error {
   }
 }
 
-const DEFAULT_LOOKBACK_DAYS = 180;
+// How far back the very first sync backfills when no explicit sinceDate or
+// SYNC_LOOKBACK_DAYS override is given. Anchored to Jan 1 of the current
+// year (not a fixed day count) so a fresh connect always pulls the whole
+// year to date, without needing to be re-tuned as the year goes on.
+function startOfCurrentYear(): Date {
+  return new Date(new Date().getFullYear(), 0, 1);
+}
 // Bounds how many pages a single invocation processes, so a Vercel-timeout
 // limited run yields control (saving resume state) instead of restarting
 // from scratch next time. Each message costs its own Gmail API round trip
@@ -254,10 +260,10 @@ export async function processGmailImport(
       pageToken = resume.pageToken;
     } else if (options?.sinceDate) {
       query = buildFinancialSearchQueryAfterDate(options.sinceDate);
+    } else if (process.env.SYNC_LOOKBACK_DAYS) {
+      query = buildFinancialSearchQuery(Number(process.env.SYNC_LOOKBACK_DAYS));
     } else {
-      const lookbackDays =
-        Number(process.env.SYNC_LOOKBACK_DAYS) || DEFAULT_LOOKBACK_DAYS;
-      query = buildFinancialSearchQuery(lookbackDays);
+      query = buildFinancialSearchQueryAfterDate(startOfCurrentYear());
     }
 
     const { remainingPageToken } = await runPagedImport(
