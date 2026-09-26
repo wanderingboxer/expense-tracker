@@ -182,9 +182,21 @@ export default function TransactionDetailPage() {
         const refreshed = await fetch(`/api/transactions/${params.id}`).then((r) => r.json());
         setTx(refreshed);
       } else {
-        const target = merchantOptions.find(
-          (m) => m.name.toLowerCase() === reassignInput.trim().toLowerCase()
-        );
+        const typed = reassignInput.trim();
+        if (!typed) throw new Error("Enter a merchant name");
+
+        // Re-query filtered by the typed text rather than trusting the
+        // datalist's earlier unfiltered, capped-at-50 fetch — with >50
+        // merchants, an exact match past that cutoff would otherwise be
+        // missed and silently create a duplicate merchant instead of
+        // merging into the existing one.
+        const matches = await fetch(`/api/merchants?q=${encodeURIComponent(typed)}`)
+          .then((r) => (r.ok ? r.json() : []))
+          .catch(() => []);
+        const target = Array.isArray(matches)
+          ? matches.find((m: { name: string }) => m.name.toLowerCase() === typed.toLowerCase())
+          : undefined;
+
         const body = target
           ? {
               sourceMerchantId: tx.merchant.id,
@@ -193,10 +205,9 @@ export default function TransactionDetailPage() {
             }
           : {
               sourceMerchantId: tx.merchant.id,
-              newMerchantName: reassignInput.trim(),
+              newMerchantName: typed,
               applyToAllPastTransactions: applyToAllPast,
             };
-        if (!reassignInput.trim()) throw new Error("Enter a merchant name");
 
         const res = await fetch("/api/merchants/merge-and-alias", {
           method: "POST",

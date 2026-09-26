@@ -2,15 +2,7 @@
 // npm install --save-dev prisma dotenv
 import "dotenv/config";
 import { defineConfig } from "prisma/config";
-
-// Picks the first candidate that is actually a non-empty string. A project
-// can have multiple Postgres integrations attached (e.g. an unused add-on
-// alongside the real database), and an unused one's env vars are often
-// present but set to "" rather than genuinely unset — `??` alone doesn't
-// skip those, since "" is not null/undefined.
-function firstNonEmpty(...candidates: (string | undefined)[]): string | undefined {
-  return candidates.find((c) => typeof c === "string" && c.length > 0);
-}
+import { resolveDatabaseUrl } from "./src/lib/db-url";
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
@@ -20,13 +12,6 @@ export default defineConfig({
   datasource: {
     // Same connection this app's runtime (src/lib/prisma.ts) actually uses,
     // checked first, before any other Postgres integration's vars.
-    url: firstNonEmpty(
-      process.env["POSTGRES_PRISMA_URL"],
-      process.env["POSTGRES_PRISMA_DATABASE_URL"],
-      process.env["POSTGRES_URL"],
-      process.env["POSTGRES_DATABASE_URL"],
-      process.env["DATABASE_URL"],
-      process.env["POSTGRES_URL_NON_POOLING"]
-    ),
+    url: resolveDatabaseUrl(),
   },
 });

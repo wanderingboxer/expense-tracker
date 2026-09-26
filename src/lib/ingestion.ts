@@ -259,13 +259,18 @@ export async function processGmailImport(
 
 /** Subscription detection only makes sense once a sync run has actually
  * finished (not mid-pagination) — otherwise a partial transaction history
- * could produce false patterns. Failures here are logged, not fatal: a
- * detection bug shouldn't turn a successful sync into a failed one. */
+ * could produce false patterns. Also skipped when nothing new landed: it's
+ * a full re-scan of the user's entire transaction history, so running it
+ * on every routine cron tick (most of which find zero new emails) would
+ * make sync cost grow with total history size regardless of how much
+ * actually changed. Failures here are logged, not fatal: a detection bug
+ * shouldn't turn a successful sync into a failed one. */
 async function runSubscriptionDetectionIfComplete(
   userId: string,
   stats: ImportStats
 ): Promise<void> {
   if (stats.partial) return;
+  if (stats.candidatesCreated === 0 && stats.duplicatesMerged === 0) return;
   try {
     await detectSubscriptions(userId);
   } catch (err) {
@@ -313,16 +318,28 @@ export async function processIncrementalSync(
         // window) — we already hold the lock, so this reuses the same
         // paged-import path directly instead of re-entering
         // processGmailImport (which would try to acquire the lock again).
-        const sinceDate =
-          connection.lastSyncAt ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-        const query = buildFinancialSearchQueryAfterDate(sinceDate);
+        //
+        // If a prior run of this same fallback already saved resume state
+        // (its own bounded resync needed more than one invocation's page
+        // budget), continue from there instead of restarting at page 1.
+        let query: string;
+        let startPageToken: string | undefined;
+        if (connection.nextPageToken) {
+          const resume = JSON.parse(connection.nextPageToken) as ResumeState;
+          query = resume.query;
+          startPageToken = resume.pageToken;
+        } else {
+          const sinceDate =
+            connection.lastSyncAt ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+          query = buildFinancialSearchQueryAfterDate(sinceDate);
+        }
         stats.firstErrorMessage = "Gmail history expired; ran a bounded full resync instead";
 
         const { remainingPageToken } = await runPagedImport(
           userId,
           gmail,
           query,
-          undefined,
+          startPageToken,
           stats
         );
         await finishImportRun(connection, gmail, auth, query, remainingPageToken, stats);

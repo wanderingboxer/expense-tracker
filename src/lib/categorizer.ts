@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { RuleSource } from "@/generated/prisma/enums";
+import { normalizeMerchantName } from "@/lib/merchant-normalizer";
 
 interface CategorizationResult {
   categoryId: string;
@@ -282,14 +283,22 @@ export async function categorizeTransaction(
   type: string,
   _amount: number
 ): Promise<CategorizationResult> {
+  // Merchant names in CategoryRule lookups are joined by Merchant.normalizedName,
+  // which strips transaction prefixes ("POS-", "UPI-") and legal suffixes
+  // ("Pvt Ltd", etc.) — the raw merchant string must go through the same
+  // normalization or a rule keyed on the normalized name never matches.
+  const normalizedMerchantName = merchantName
+    ? normalizeMerchantName(merchantName).toLowerCase()
+    : "";
+
   // 1) User rules for this merchant
-  if (merchantName) {
+  if (normalizedMerchantName) {
     const userRule = await prisma.categoryRule.findFirst({
       where: {
         userId,
         source: RuleSource.USER,
         merchant: {
-          normalizedName: merchantName.toLowerCase(),
+          normalizedName: normalizedMerchantName,
         },
       },
       orderBy: { updatedAt: "desc" },
@@ -309,13 +318,13 @@ export async function categorizeTransaction(
   }
 
   // 2) Learned merchant rules
-  if (merchantName) {
+  if (normalizedMerchantName) {
     const learnedRule = await prisma.categoryRule.findFirst({
       where: {
         userId,
         source: RuleSource.LEARNED,
         merchant: {
-          normalizedName: merchantName.toLowerCase(),
+          normalizedName: normalizedMerchantName,
         },
       },
       orderBy: { applyCount: "desc" },
