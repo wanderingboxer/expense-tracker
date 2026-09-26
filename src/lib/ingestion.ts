@@ -82,6 +82,13 @@ const DEFAULT_LOOKBACK_DAYS = 180;
 // rest across however many invocations it takes.
 const MAX_PAGES_PER_RUN = 1;
 
+// Gmail's default page size (100) is itself too many messages for one
+// invocation's budget — a single page timed out in production even with
+// MAX_PAGES_PER_RUN=1, killing the function before it could save resume
+// state or release the lock. Request small pages instead so one run always
+// fits comfortably inside the platform's execution-time limit.
+const MESSAGES_PAGE_SIZE = 15;
+
 interface ResumeState {
   query: string;
   pageToken?: string;
@@ -127,7 +134,8 @@ async function runPagedImport(
     const { messageIds, nextPageToken } = await searchFinancialEmails(
       gmail,
       query,
-      pageToken
+      pageToken,
+      MESSAGES_PAGE_SIZE
     );
 
     for (const messageId of messageIds) {

@@ -98,7 +98,8 @@ export function buildFinancialSearchQueryAfterDate(date: Date): string {
 export async function searchFinancialEmails(
   gmail: gmail_v1.Gmail,
   query?: string,
-  pageToken?: string
+  pageToken?: string,
+  maxResults = 100
 ): Promise<{ messageIds: string[]; nextPageToken?: string }> {
   const q = query ?? buildFinancialSearchQuery();
 
@@ -106,7 +107,7 @@ export async function searchFinancialEmails(
     userId: "me",
     q,
     pageToken: pageToken || undefined,
-    maxResults: 100,
+    maxResults,
   });
 
   const messageIds =

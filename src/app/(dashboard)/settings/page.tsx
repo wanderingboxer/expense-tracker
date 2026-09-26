@@ -34,6 +34,14 @@ interface GmailStatus {
   errorMessage?: string | null;
 }
 
+interface ImportStats {
+  totalScanned: number;
+  financialFound: number;
+  candidatesCreated: number;
+  duplicatesMerged: number;
+  partial: boolean;
+}
+
 interface Category {
   id: string;
   name: string;
@@ -121,13 +129,24 @@ function GmailSection({ email }: { email?: string | null }) {
     setSyncResult(null);
     try {
       const res = await fetch("/api/gmail/sync", { method: "POST" });
-      const data = await res.json();
+      let data: { stats?: ImportStats; error?: string };
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(
+          res.status === 504 || res.status === 500
+            ? "Sync timed out on the server. It may have partially completed — try Sync Now again to continue."
+            : `Sync failed (HTTP ${res.status})`
+        );
+      }
       if (!res.ok) {
         throw new Error(data.error || "Sync failed");
       }
-      const s = data.stats;
+      const s = data.stats!;
       setSyncResult(
-        `Scanned ${s.totalScanned} emails, found ${s.financialFound} financial, created ${s.candidatesCreated} transactions, merged ${s.duplicatesMerged} duplicates`
+        `Scanned ${s.totalScanned} emails, found ${s.financialFound} financial, created ${s.candidatesCreated} transactions, merged ${s.duplicatesMerged} duplicates${
+          s.partial ? " — more remain, click Sync Now again to continue" : ""
+        }`
       );
       await fetchStatus();
     } catch (e) {
