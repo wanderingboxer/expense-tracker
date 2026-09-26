@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { SyncStatus } from "@/generated/prisma/enums";
 import {
   processGmailImport,
   processIncrementalSync,
@@ -64,6 +65,12 @@ export async function DELETE() {
         nextPageToken: null,
         lastSyncErrorCount: null,
         errorMessage: null,
+        // A reset can be triggered while a sync lock is stuck at SYNCING
+        // (that's often *why* the user is resetting); without clearing it
+        // here explicitly, the next sync attempt immediately 409s and the
+        // stale-lock reclaim won't fire for another 10 minutes since this
+        // update just refreshed updatedAt.
+        syncStatus: SyncStatus.IDLE,
       },
     });
 
