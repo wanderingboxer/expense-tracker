@@ -29,6 +29,26 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
+## Database migrations
+
+Schema changes are managed with Prisma Migrate (`prisma/migrations/`).
+`npm run build` runs `prisma migrate deploy` automatically before building.
+
+**One-time step for the existing production database:** it was originally set
+up via a manual SQL endpoint (since removed) rather than a migration, so its
+schema already matches `prisma/schema.prisma` but Prisma doesn't know that.
+Before the first deploy with this migration history, mark the baseline
+migration as already applied (run once, against production):
+
+```bash
+DATABASE_URL="<production-database-url>" npx prisma migrate resolve --applied 20260926093545_init
+```
+
+After that, `prisma migrate deploy` (via `npm run build`, or `npm run db:migrate`
+directly) applies new migrations normally. For a fresh database that has never
+had this schema, skip the `resolve` step — `migrate deploy` will apply the
+baseline migration itself.
+
 ## Deploy on Vercel
 
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
