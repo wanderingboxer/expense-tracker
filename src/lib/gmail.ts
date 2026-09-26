@@ -70,7 +70,8 @@ export function getUpdatedAccessToken(
   return auth.credentials.access_token ?? null;
 }
 
-export const HDFC_SENDER_QUERY = "from:alerts@hdfcbank.bank.in";
+export const HDFC_SENDER_ADDRESS = "alerts@hdfcbank.bank.in";
+export const HDFC_SENDER_QUERY = `from:${HDFC_SENDER_ADDRESS}`;
 
 function formatAfterDate(date: Date): string {
   const yyyy = date.getFullYear();

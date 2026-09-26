@@ -209,4 +209,45 @@ describe("ingestion.ts sync orchestration (mocked Gmail client, real database)",
     expect(connection?.syncStatus).toBe("IDLE");
     expect(connection?.lastSyncAt).not.toBeNull();
   });
+
+  it("ignores non-HDFC senders surfaced by incremental sync's mailbox-wide history scan", async () => {
+    // Regression guard for a real production bug: getHistoryChanges (used
+    // by incremental sync) lists every new message in the whole mailbox —
+    // Gmail's History API has no sender filter — so a referral/newsletter
+    // email unrelated to HDFC can still reach the classifier. A subject
+    // like "Refer Now & Unlock Exclusive Rewards" matches the loose
+    // reference-number pattern, and body copy mentioning a reward amount
+    // satisfies the currency check, so content-based scoring alone let it
+    // through and created a fake "transaction". The sender must be a hard
+    // gate, independent of content.
+    await prisma.gmailConnection.update({
+      where: { id: connectionId },
+      data: { historyId: BigInt(500), lastSyncAt: new Date("2026-09-20") },
+    });
+
+    (getHistoryChanges as jest.Mock).mockResolvedValue({
+      addedMessageIds: ["spam-1"],
+    });
+    (getMessage as jest.Mock).mockResolvedValue({
+      id: "spam-1",
+      threadId: "spam-1",
+      from: "AECC India <student.india@aeccglobal.com>",
+      subject: "Aditya, Refer Now & Unlock Exclusive Rewards",
+      date: new Date().toISOString(),
+      bodyText: "Refer a friend and earn a reward of Rs.5,000 when they enroll.",
+      bodyHtml: "",
+      snippet: "",
+    });
+
+    await processIncrementalSync(userId);
+
+    const financialEmail = await prisma.financialEmail.findUnique({
+      where: { gmailMessageId: "spam-1" },
+    });
+    expect(financialEmail).not.toBeNull();
+    expect(financialEmail?.isFinancial).toBe(false);
+
+    const transactions = await prisma.transaction.findMany({ where: { userId } });
+    expect(transactions).toHaveLength(0);
+  });
 });

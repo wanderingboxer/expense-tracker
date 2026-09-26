@@ -10,6 +10,7 @@ import {
   getMessage,
   getHistoryChanges,
   HistoryExpiredError,
+  HDFC_SENDER_ADDRESS,
   type ParsedMessage,
 } from "@/lib/gmail";
 import {
@@ -441,8 +442,19 @@ export async function processSingleEmail(
     bodyText,
   };
 
+  // Incremental sync (processIncrementalSync -> getHistoryChanges) lists
+  // every new message in the whole mailbox, not just HDFC ones — Gmail's
+  // History API has no sender filter. The content-based classifier alone
+  // isn't a safe gate for "is this an HDFC alert": a referral/newsletter
+  // email can still contain a currency-looking number and incidentally
+  // match a reference-number pattern (e.g. "Refer Now" itself matches the
+  // loose `ref(erence)?` pattern). Require the exact configured sender
+  // address as a hard prerequisite, unconditionally, before any scoring.
+  const isFromConfiguredSender =
+    senderEmail.toLowerCase() === HDFC_SENDER_ADDRESS.toLowerCase();
+
   const relevanceScore = calculateRelevanceScore(emailData);
-  const financial = isFinancialEmail(emailData, relevanceScore);
+  const financial = isFromConfiguredSender && isFinancialEmail(emailData, relevanceScore);
 
   // Store the email record
   const financialEmail = await prisma.financialEmail.create({
