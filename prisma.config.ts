@@ -9,6 +9,17 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env["POSTGRES_URL_NON_POOLING"] ?? process.env["DATABASE_URL"],
+    // Match the same fallback chain src/lib/prisma.ts uses at runtime, so
+    // migrations resolve the same connection whatever the Vercel Postgres
+    // integration happened to name it. Prefer a direct (non-pooled)
+    // connection when available since migrations need session-level
+    // features a pgbouncer transaction-mode pool doesn't support.
+    url:
+      process.env["POSTGRES_URL_NON_POOLING"] ??
+      process.env["POSTGRES_PRISMA_URL"] ??
+      process.env["POSTGRES_PRISMA_DATABASE_URL"] ??
+      process.env["POSTGRES_URL"] ??
+      process.env["POSTGRES_DATABASE_URL"] ??
+      process.env["DATABASE_URL"],
   },
 });
