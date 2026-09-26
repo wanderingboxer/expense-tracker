@@ -3,6 +3,7 @@ import { TransactionType, PaymentMethod } from "@/generated/prisma/enums";
 export interface ExtractedAmount {
   amount: number;
   currency: string;
+  index: number;
 }
 
 export interface ExtractedDate {
@@ -44,7 +45,7 @@ export function extractAmounts(text: string): ExtractedAmount[] {
       const raw = match[1].replace(/,/g, "");
       const amount = parseFloat(raw);
       if (!isNaN(amount) && amount > 0) {
-        results.push({ amount, currency });
+        results.push({ amount, currency, index: match.index });
       }
     }
   }
@@ -80,6 +81,16 @@ export function extractDates(text: string): ExtractedDate[] {
       regex: /(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),?\s+(\d{4})/gi,
       parse: (m) => {
         const d = new Date(`${m[1]} ${m[2]}, ${m[3]}`);
+        return isNaN(d.getTime()) ? null : d;
+      },
+    },
+    {
+      // DD-MM-YY (2-digit year), e.g. HDFC's "on 26-09-26". The \d{4}
+      // patterns above require exactly 4 digits so they never match this;
+      // \b prevents matching the first 2 digits of a longer year.
+      regex: /\b(\d{2})[\/\-](\d{2})[\/\-](\d{2})\b/g,
+      parse: (m) => {
+        const d = new Date(`20${m[3]}-${m[2]}-${m[1]}`);
         return isNaN(d.getTime()) ? null : d;
       },
     },
@@ -119,8 +130,16 @@ export function extractReferences(text: string): string[] {
   const refs: string[] = [];
   const patterns = [
     /UTR[\s:]*([A-Z0-9]{10,})/gi,
-    /(?:ref(?:erence)?|txn|transaction)\s*(?:no|number|id|#)?[\s:]*([A-Z0-9]{6,})/gi,
-    /order\s*(?:no|number|id|#)?[\s:]*([A-Z0-9]{6,})/gi,
+    // Dedicated pattern for HDFC's real phrasing ("UPI transaction reference
+    // no.: 489172985779"). Without this, the generic pattern below matches at
+    // "transaction" and, because the filler word "reference" sits between the
+    // keyword and the digits, its capture group (case-insensitively matching
+    // [A-Z0-9]) grabs the word "reference" itself instead of the number.
+    /transaction\s+reference\s+no\.?\s*[:\s]*([0-9]{6,})/gi,
+    // Generic patterns, tightened to require at least one digit in the
+    // capture so a bare filler word can't be mistaken for a reference id.
+    /(?:ref(?:erence)?|txn|transaction)\s*(?:no|number|id|#)?[\s:]*((?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]{6,})/gi,
+    /order\s*(?:no|number|id|#)?[\s:]*((?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]{6,})/gi,
   ];
 
   for (const pattern of patterns) {
@@ -172,6 +191,7 @@ export function extractUpiId(text: string): string | null {
       "indus",
       "federal",
       "rbl",
+      "yesbankltd",
     ];
     const domain = match[0].split("@")[1];
     if (upiHandles.some((h) => domain.includes(h))) {
@@ -229,6 +249,10 @@ export function extractMerchantName(
 ): string | null {
   const combined = `${subject} ${text}`;
   const patterns = [
+    // HDFC's real UPI alert phrasing: "towards VPA <upi-id> (<Name>)". The
+    // parenthesized name is the cleanest, most reliable merchant signal
+    // available for this template, so it's checked first.
+    /towards\s+VPA\s+[\w.@-]+\s*\(([^)]+)\)/i,
     /(?:paid to|payment to|transferred to|sent to)\s+([A-Za-z0-9\s&'.()-]+?)(?:\s+(?:on|for|via|ref|$))/i,
     /(?:at|from)\s+([A-Za-z0-9\s&'.()-]+?)(?:\s+(?:on|for|via|ref|using|$))/i,
     /(?:purchase at|transaction at)\s+([A-Za-z0-9\s&'.()-]+?)(?:\s+(?:on|for|$))/i,
@@ -265,6 +289,39 @@ function stripHtml(html: string): string {
     .trim();
 }
 
+const BALANCE_CONTEXT_WINDOW = 30;
+const BALANCE_KEYWORDS = ["balance", "limit", "available"];
+const DEBIT_CREDIT_KEYWORDS = ["debited", "credited", "spent", "paid", "charged", "received"];
+
+function pickPrimaryAmount(
+  text: string,
+  amounts: ExtractedAmount[]
+): ExtractedAmount {
+  if (amounts.length === 1) return amounts[0];
+
+  const lower = text.toLowerCase();
+
+  const isNearBalanceContext = (index: number): boolean => {
+    const start = Math.max(0, index - BALANCE_CONTEXT_WINDOW);
+    const end = Math.min(lower.length, index + BALANCE_CONTEXT_WINDOW);
+    const window = lower.slice(start, end);
+    return BALANCE_KEYWORDS.some((kw) => window.includes(kw));
+  };
+
+  const isNearDebitCreditContext = (index: number): boolean => {
+    const start = Math.max(0, index - BALANCE_CONTEXT_WINDOW);
+    const end = Math.min(lower.length, index + BALANCE_CONTEXT_WINDOW);
+    const window = lower.slice(start, end);
+    return DEBIT_CREDIT_KEYWORDS.some((kw) => window.includes(kw));
+  };
+
+  const candidates = amounts.filter((a) => !isNearBalanceContext(a.index));
+  const pool = candidates.length > 0 ? candidates : amounts;
+
+  const nearDebitCredit = pool.find((a) => isNearDebitCreditContext(a.index));
+  return nearDebitCredit ?? pool[0];
+}
+
 export function parseTransactionFromEmail(email: {
   sender: string;
   senderDomain: string;
@@ -278,8 +335,10 @@ export function parseTransactionFromEmail(email: {
   const amounts = extractAmounts(text);
   if (amounts.length === 0) return null;
 
-  // Use the first (usually primary) amount
-  const primaryAmount = amounts[0];
+  // When multiple amounts appear (e.g. a debited amount plus a mentioned
+  // available balance), prefer the one nearest a debit/credit keyword and
+  // skip amounts that sit right next to balance/limit phrasing.
+  const primaryAmount = pickPrimaryAmount(text, amounts);
 
   const dates = extractDates(text);
   const time = extractTime(text);

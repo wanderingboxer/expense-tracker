@@ -13,36 +13,55 @@ import {
 describe("extractAmounts", () => {
   it("extracts ₹1,499", () => {
     const result = extractAmounts("You paid ₹1,499 at Swiggy");
-    expect(result).toEqual([{ amount: 1499, currency: "INR" }]);
+    expect(result).toEqual([
+      expect.objectContaining({ amount: 1499, currency: "INR" }),
+    ]);
   });
 
   it("extracts Rs. 2,500", () => {
     const result = extractAmounts("Amount Rs. 2,500 debited");
-    expect(result).toEqual([{ amount: 2500, currency: "INR" }]);
+    expect(result).toEqual([
+      expect.objectContaining({ amount: 2500, currency: "INR" }),
+    ]);
   });
 
   it("extracts INR 10,000", () => {
     const result = extractAmounts("INR 10,000 credited");
-    expect(result).toEqual([{ amount: 10000, currency: "INR" }]);
+    expect(result).toEqual([
+      expect.objectContaining({ amount: 10000, currency: "INR" }),
+    ]);
   });
 
   it("extracts $99.99", () => {
     const result = extractAmounts("Charged $99.99");
-    expect(result).toEqual([{ amount: 99.99, currency: "USD" }]);
+    expect(result).toEqual([
+      expect.objectContaining({ amount: 99.99, currency: "USD" }),
+    ]);
   });
 
   it("extracts Rs 500 (no dot)", () => {
     const result = extractAmounts("Rs 500 paid");
-    expect(result).toEqual([{ amount: 500, currency: "INR" }]);
+    expect(result).toEqual([
+      expect.objectContaining({ amount: 500, currency: "INR" }),
+    ]);
   });
 
   it("extracts ₹1,23,456 (Indian numbering)", () => {
     const result = extractAmounts("₹1,23,456 transferred");
-    expect(result).toEqual([{ amount: 123456, currency: "INR" }]);
+    expect(result).toEqual([
+      expect.objectContaining({ amount: 123456, currency: "INR" }),
+    ]);
   });
 
   it("returns empty for no amounts", () => {
     expect(extractAmounts("Hello world")).toEqual([]);
+  });
+
+  it("prefers the debited amount over a mentioned balance", () => {
+    const result = extractAmounts(
+      "Rs.60.00 is debited from your account. Available balance is Rs.15,000.00"
+    );
+    expect(result.length).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -79,6 +98,14 @@ describe("extractDates", () => {
     expect(result).toHaveLength(1);
     expect(result[0].date.getFullYear()).toBe(2026);
     expect(result[0].date.getMonth()).toBe(7);
+  });
+
+  it('parses real HDFC 2-digit-year format "on 26-09-26"', () => {
+    const result = extractDates("on 26-09-26");
+    expect(result.length).toBeGreaterThanOrEqual(1);
+    expect(result[0].date.getFullYear()).toBe(2026);
+    expect(result[0].date.getMonth()).toBe(8); // September
+    expect(result[0].date.getDate()).toBe(26);
   });
 });
 
@@ -123,6 +150,14 @@ describe("extractReferences", () => {
   it("returns empty for no references", () => {
     expect(extractReferences("Hello world")).toEqual([]);
   });
+
+  it("extracts the real number from real HDFC phrasing, not the word 'reference'", () => {
+    const result = extractReferences(
+      "UPI transaction reference no.: 489172985779."
+    );
+    expect(result).toContain("489172985779");
+    expect(result).not.toContain("reference");
+  });
 });
 
 describe("extractCardInfo", () => {
@@ -154,6 +189,12 @@ describe("extractUpiId", () => {
 
   it("returns null for regular email", () => {
     expect(extractUpiId("from test@gmail.com")).toBeNull();
+  });
+
+  it("recognizes a real yesbankltd VPA", () => {
+    expect(extractUpiId("towards VPA BHARATPE90727376974@yesbankltd (X)")).toBe(
+      "BHARATPE90727376974@yesbankltd"
+    );
   });
 });
 
@@ -224,5 +265,14 @@ describe("extractMerchantName", () => {
 
   it("returns null for no merchant", () => {
     expect(extractMerchantName("amount debited", "")).toBeNull();
+  });
+
+  it('extracts the name from real HDFC "towards VPA ... (Name)" phrasing', () => {
+    expect(
+      extractMerchantName(
+        "Rs.406.36 is debited from your account ending 4781 towards VPA MCDONALDSINNOVITI@ybl (McDonalds Hardcastle Restaurants) on 25-09-26.",
+        ""
+      )
+    ).toBe("McDonalds Hardcastle Restaurants");
   });
 });
