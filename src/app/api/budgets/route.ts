@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { BudgetPeriod, TransactionType } from "@/generated/prisma/enums";
+import { getPeriodRange } from "@/lib/budget-period";
 
 const createSchema = z.object({
   name: z.string().min(1),
@@ -11,39 +12,6 @@ const createSchema = z.object({
   categoryId: z.string().uuid().optional(),
   startDate: z.string().transform((s) => new Date(s)),
 });
-
-function getPeriodRange(period: string, startDate: Date): { from: Date; to: Date } {
-  const now = new Date();
-  const from = new Date(now.getFullYear(), now.getMonth(), 1);
-  const to = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-
-  switch (period) {
-    case "WEEKLY": {
-      const day = now.getDay();
-      const weekStart = new Date(now);
-      weekStart.setDate(now.getDate() - day);
-      weekStart.setHours(0, 0, 0, 0);
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekStart.getDate() + 6);
-      weekEnd.setHours(23, 59, 59);
-      return { from: weekStart, to: weekEnd };
-    }
-    case "QUARTERLY": {
-      const q = Math.floor(now.getMonth() / 3);
-      return {
-        from: new Date(now.getFullYear(), q * 3, 1),
-        to: new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59),
-      };
-    }
-    case "YEARLY":
-      return {
-        from: new Date(now.getFullYear(), 0, 1),
-        to: new Date(now.getFullYear(), 11, 31, 23, 59, 59),
-      };
-    default:
-      return { from, to };
-  }
-}
 
 export async function GET() {
   try {
@@ -66,7 +34,7 @@ export async function GET() {
           userId,
           isExcluded: false,
           type: TransactionType.EXPENSE,
-          transactionDate: { gte: from, lte: to },
+          transactionDate: { gte: from, lt: to },
         };
         if (b.categoryId) where.categoryId = b.categoryId;
 
