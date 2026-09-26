@@ -15,26 +15,26 @@ import {
 
 export default function LoginPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-950 dark:to-gray-900 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-secondary p-4">
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-emerald-600 text-white mb-4">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary text-primary-foreground mb-4">
             <Wallet className="w-8 h-8" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+          <h1 className="text-3xl font-bold text-foreground">
             FinanceFlow
           </h1>
-          <p className="mt-2 text-gray-600 dark:text-gray-400 text-lg">
+          <p className="mt-2 text-muted-foreground text-lg">
             Understand where your money goes
           </p>
         </div>
 
         {/* Card */}
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 p-8">
+        <div className="bg-card rounded-2xl shadow-xl border border-border p-8">
           <button
             onClick={() => signIn("google", { callbackUrl: "/" })}
-            className="w-full flex items-center justify-center gap-3 px-6 py-3.5 rounded-xl bg-gray-900 dark:bg-white text-white dark:text-gray-900 font-semibold text-base hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors cursor-pointer"
+            className="w-full flex items-center justify-center gap-3 px-6 py-3.5 rounded-xl bg-foreground text-background font-semibold text-base hover:opacity-90 transition-opacity cursor-pointer"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">
               <path
@@ -59,11 +59,11 @@ export default function LoginPage() {
           </button>
 
           {/* Divider */}
-          <div className="my-8 border-t border-gray-200 dark:border-gray-700" />
+          <div className="my-8 border-t border-border" />
 
           {/* Features */}
           <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
               What you get
             </h3>
             <div className="space-y-3">
@@ -85,8 +85,8 @@ export default function LoginPage() {
 
         {/* Privacy note */}
         <div className="mt-6 flex items-start gap-3 px-2">
-          <Shield className="w-5 h-5 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
-          <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
+          <Shield className="w-5 h-5 text-primary mt-0.5 shrink-0" />
+          <p className="text-sm text-muted-foreground leading-relaxed">
             We request <strong>read-only</strong> access to your Gmail to find
             transaction emails. We never send emails or modify your inbox.
           </p>
@@ -98,8 +98,8 @@ export default function LoginPage() {
 
 function Feature({ icon, text }: { icon: React.ReactNode; text: string }) {
   return (
-    <div className="flex items-center gap-3 text-gray-700 dark:text-gray-300">
-      <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
+    <div className="flex items-center gap-3 text-foreground">
+      <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-accent text-accent-foreground">
         {icon}
       </div>
       <span className="text-sm font-medium">{text}</span>

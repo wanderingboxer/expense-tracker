@@ -275,7 +275,7 @@ export default function TransactionDetailPage() {
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{merchantName}</h2>
         <p
           className={cn(
-            "text-3xl font-bold mt-1",
+            "text-3xl font-bold mt-1 tabular-nums",
             isIncome ? "text-emerald-600 dark:text-emerald-400" : "text-gray-900 dark:text-white"
           )}
         >

@@ -57,8 +57,8 @@ function NavLink({
       className={cn(
         "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
         isActive
-          ? "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400"
-          : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white"
+          ? "bg-sidebar-accent text-sidebar-accent-foreground"
+          : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
       )}
     >
       <Icon className="w-5 h-5 shrink-0" />
@@ -79,8 +79,8 @@ export default function DashboardLayout({
 
   if (status === "loading") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
-        <div className="animate-spin w-8 h-8 border-2 border-emerald-600 border-t-transparent rounded-full" />
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full" />
       </div>
     );
   }
@@ -101,7 +101,7 @@ export default function DashboardLayout({
   const pageTitle = currentNav?.label ?? "Dashboard";
 
   return (
-    <div className="min-h-screen flex bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen flex bg-background">
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
@@ -113,21 +113,21 @@ export default function DashboardLayout({
       {/* Sidebar */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col transition-transform duration-200 lg:translate-x-0 lg:static lg:z-auto",
+          "fixed inset-y-0 left-0 z-50 w-64 bg-card border-r border-border flex flex-col transition-transform duration-200 lg:translate-x-0 lg:static lg:z-auto",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
         {/* Sidebar header */}
-        <div className="flex items-center gap-3 px-5 h-16 border-b border-gray-200 dark:border-gray-800">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-600 text-white">
+        <div className="flex items-center gap-3 px-5 h-16 border-b border-border">
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground">
             <Wallet className="w-4 h-4" />
           </div>
-          <span className="font-bold text-lg text-gray-900 dark:text-white">
+          <span className="font-bold text-lg text-foreground">
             FinanceFlow
           </span>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="ml-auto lg:hidden text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+            className="ml-auto lg:hidden text-muted-foreground hover:text-foreground"
           >
             <X className="w-5 h-5" />
           </button>
@@ -146,7 +146,7 @@ export default function DashboardLayout({
         </nav>
 
         {/* User section */}
-        <div className="border-t border-gray-200 dark:border-gray-800 p-4">
+        <div className="border-t border-border p-4">
           <div className="flex items-center gap-3">
             {user?.image ? (
               <img
@@ -156,15 +156,15 @@ export default function DashboardLayout({
                 referrerPolicy="no-referrer"
               />
             ) : (
-              <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900 flex items-center justify-center text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+              <div className="w-9 h-9 rounded-full bg-accent flex items-center justify-center text-sm font-semibold text-accent-foreground">
                 {user?.name?.charAt(0) ?? "?"}
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+              <p className="text-sm font-medium text-foreground truncate">
                 {user?.name}
               </p>
-              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+              <p className="text-xs text-muted-foreground truncate">
                 {user?.email}
               </p>
             </div>
@@ -175,28 +175,28 @@ export default function DashboardLayout({
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top header */}
-        <header className="sticky top-0 z-30 h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center gap-4 px-4 lg:px-6">
+        <header className="sticky top-0 z-30 h-16 bg-card border-b border-border flex items-center gap-4 px-4 lg:px-6">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="lg:hidden text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+            className="lg:hidden text-muted-foreground hover:text-foreground"
           >
             <Menu className="w-6 h-6" />
           </button>
 
-          <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
+          <h1 className="text-lg font-semibold text-foreground">
             {pageTitle}
           </h1>
 
           <div className="flex-1" />
 
           {/* Search */}
-          <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-500 text-sm w-64">
+          <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary text-secondary-foreground/70 text-sm w-64">
             <Search className="w-4 h-4" />
             <span>Search...</span>
           </div>
 
           {/* Notifications */}
-          <button className="relative text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+          <button className="relative text-muted-foreground hover:text-foreground">
             <Bell className="w-5 h-5" />
           </button>
 
@@ -214,11 +214,11 @@ export default function DashboardLayout({
                   referrerPolicy="no-referrer"
                 />
               ) : (
-                <div className="w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-900 flex items-center justify-center text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center text-xs font-semibold text-accent-foreground">
                   {user?.name?.charAt(0) ?? "?"}
                 </div>
               )}
-              <ChevronDown className="w-4 h-4 text-gray-500" />
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
             </button>
             {userMenuOpen && (
               <>
@@ -226,10 +226,10 @@ export default function DashboardLayout({
                   className="fixed inset-0 z-40"
                   onClick={() => setUserMenuOpen(false)}
                 />
-                <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-50">
+                <div className="absolute right-0 mt-2 w-48 bg-popover rounded-lg shadow-lg border border-border py-1 z-50">
                   <button
                     onClick={() => signOut({ callbackUrl: "/login" })}
-                    className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                    className="flex items-center gap-2 w-full px-4 py-2 text-sm text-popover-foreground hover:bg-accent"
                   >
                     <LogOut className="w-4 h-4" />
                     Sign out
