@@ -24,6 +24,7 @@ import {
   REVIEW_THRESHOLD,
 } from "@/lib/deduplication";
 import { categorizeTransaction } from "@/lib/categorizer";
+import { detectSubscriptions } from "@/lib/subscription-detector";
 
 function stripHtmlBasic(html: string): string {
   if (!html) return "";
@@ -252,7 +253,24 @@ export async function processGmailImport(
     throw error;
   }
 
+  await runSubscriptionDetectionIfComplete(userId, stats);
   return stats;
+}
+
+/** Subscription detection only makes sense once a sync run has actually
+ * finished (not mid-pagination) — otherwise a partial transaction history
+ * could produce false patterns. Failures here are logged, not fatal: a
+ * detection bug shouldn't turn a successful sync into a failed one. */
+async function runSubscriptionDetectionIfComplete(
+  userId: string,
+  stats: ImportStats
+): Promise<void> {
+  if (stats.partial) return;
+  try {
+    await detectSubscriptions(userId);
+  } catch (err) {
+    console.error("Subscription detection failed:", err);
+  }
 }
 
 export async function processIncrementalSync(
@@ -308,6 +326,7 @@ export async function processIncrementalSync(
           stats
         );
         await finishImportRun(connection, gmail, auth, query, remainingPageToken, stats);
+        await runSubscriptionDetectionIfComplete(userId, stats);
         return stats;
       }
       throw error;
@@ -369,6 +388,7 @@ export async function processIncrementalSync(
     throw error;
   }
 
+  await runSubscriptionDetectionIfComplete(userId, stats);
   return stats;
 }
 
