@@ -116,8 +116,11 @@ describe("ingestion.ts sync orchestration (mocked Gmail client, real database)",
   });
 
   it("saves resume state on a partial run (more pages than one invocation processes) and resumes it on the next call", async () => {
-    // Every call returns a nextPageToken, so the bounded per-run page loop
-    // exhausts its budget without ever seeing pageToken=undefined.
+    // Mocked calls resolve instantly, so the real 45s production time
+    // budget would make this test loop for 45 real seconds before ever
+    // seeing pageToken=undefined. Shrink it so the run instead exhausts
+    // its budget quickly, the same way a slow real Gmail API would.
+    process.env.SYNC_TIME_BUDGET_MS = "50";
     (searchFinancialEmails as jest.Mock).mockImplementation(
       async (_gmail, _query, pageToken) => ({
         messageIds: [],
@@ -126,6 +129,7 @@ describe("ingestion.ts sync orchestration (mocked Gmail client, real database)",
     );
 
     const stats = await processGmailImport(userId);
+    delete process.env.SYNC_TIME_BUDGET_MS;
     expect(stats.partial).toBe(true);
 
     const connection = await prisma.gmailConnection.findUnique({ where: { id: connectionId } });

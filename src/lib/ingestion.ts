@@ -80,20 +80,19 @@ export class SyncInProgressError extends Error {
 function startOfCurrentYear(): Date {
   return new Date(new Date().getFullYear(), 0, 1);
 }
-// Bounds how many pages a single invocation processes, so a Vercel-timeout
-// limited run yields control (saving resume state) instead of restarting
-// from scratch next time. Each message costs its own Gmail API round trip
-// (getMessage) plus DB writes, so even 100 messages (1 page) can approach
-// a 60s budget — kept low deliberately; the resume mechanism picks up the
-// rest across however many invocations it takes.
-const MAX_PAGES_PER_RUN = 1;
+// A fixed page/message-count cap can't account for real-world Gmail API
+// latency (cold starts, rate limiting, network variance) — 15 messages
+// still timed out in production. A wall-clock budget is the only cutoff
+// that actually bounds run time regardless of per-message cost: yield
+// control (saving resume state) with margin to spare before the platform
+// kills the invocation (Vercel Hobby maxDuration is 60s). Read live (not
+// cached at module load) so tests can bound how long a mocked-instant
+// loop runs for.
+function getTimeBudgetMs(): number {
+  return Number(process.env.SYNC_TIME_BUDGET_MS) || 45_000;
+}
 
-// Gmail's default page size (100) is itself too many messages for one
-// invocation's budget — a single page timed out in production even with
-// MAX_PAGES_PER_RUN=1, killing the function before it could save resume
-// state or release the lock. Request small pages instead so one run always
-// fits comfortably inside the platform's execution-time limit.
-const MESSAGES_PAGE_SIZE = 15;
+const MESSAGES_PAGE_SIZE = 25;
 
 interface ResumeState {
   query: string;
@@ -133,8 +132,9 @@ async function runPagedImport(
   startPageToken: string | undefined,
   stats: ImportStats
 ): Promise<{ remainingPageToken?: string }> {
+  const startedAt = Date.now();
+  const timeBudgetMs = getTimeBudgetMs();
   let pageToken = startPageToken;
-  let pageCount = 0;
 
   do {
     const { messageIds, nextPageToken } = await searchFinancialEmails(
@@ -144,7 +144,19 @@ async function runPagedImport(
       MESSAGES_PAGE_SIZE
     );
 
+    let ranOutOfTime = false;
+
     for (const messageId of messageIds) {
+      // Checked before each message (not just between pages) since a page
+      // can itself take longer than the whole budget. Resuming from the
+      // *current* pageToken re-fetches this same page next run, but the
+      // existing-FinancialEmail check below makes that safe — already
+      // processed messages are skipped, not redone.
+      if (Date.now() - startedAt > timeBudgetMs) {
+        ranOutOfTime = true;
+        break;
+      }
+
       stats.totalScanned++;
 
       const existing = await prisma.financialEmail.findUnique({
@@ -168,9 +180,12 @@ async function runPagedImport(
       }
     }
 
+    if (ranOutOfTime) {
+      return { remainingPageToken: pageToken };
+    }
+
     pageToken = nextPageToken;
-    pageCount++;
-  } while (pageToken && pageCount < MAX_PAGES_PER_RUN);
+  } while (pageToken && Date.now() - startedAt <= timeBudgetMs);
 
   return { remainingPageToken: pageToken };
 }
