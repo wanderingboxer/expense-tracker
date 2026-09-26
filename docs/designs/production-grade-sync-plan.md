@@ -14,9 +14,39 @@ reliability, and security hygiene, not SaaS polish.
 
 ## Current State (verified this session)
 
-- Sender query hardcoded to `alerts@hdfcbank.bank.in` (`src/lib/gmail.ts:74`);
-  `email-detector.ts:2-3` still lists `hdfcbank.net` — inconsistent, real
-  sender unconfirmed.
+- Sender confirmed via real email: `alerts@hdfcbank.bank.in`. Matches
+  `src/lib/gmail.ts:74`'s search query and is present in
+  `email-detector.ts`'s domain list — **already correct**, contrary to the
+  earlier assumption; needs a regression test, not a fix.
+- **NEW, confirmed against real samples — reference/UTR extraction is broken.**
+  `extractReferences` (`parser.ts:118-134`) regex
+  `/(?:ref(?:erence)?|txn|transaction)\s*(?:no|number|id|#)?[\s:]*([A-Z0-9]{6,})/gi`
+  against `"UPI transaction reference no.: 489172985779"`: the case-insensitive
+  flag makes `[A-Z0-9]` match lowercase letters, so the regex matches at
+  "transaction" and greedily captures the word **"reference"** itself (9
+  letters, satisfies `{6,}`) instead of continuing to the actual 12-digit
+  number. Result: `referenceNumber` = `"reference"` (garbage), and since
+  that's <12 chars, `utr` = `null` too. **This silently disables exact
+  reference/UTR match — the highest-confidence dedup signal (+50 score) never
+  fires for any real transaction.** Highest priority parser fix.
+- **NEW, confirmed — date extraction fails entirely for the real template.**
+  HDFC alerts use `"on 26-09-26"` (DD-MM-**YY**, 2-digit year); every pattern
+  in `extractDates` (`parser.ts:55-99`) requires a 4-digit year. No pattern
+  matches, `transactionDate` is `null` for every real email, and
+  `ingestion.ts:386` silently falls back to `new Date()` (today) — every
+  transaction gets today's date instead of its real date.
+- **NEW, confirmed — merchant extraction never fires for real HDFC UPI
+  alerts.** None of the 4 patterns in `extractMerchantName` (`parser.ts:226-247`)
+  match `"towards VPA <upi-id> (<Name>)"` — the real, reliable merchant name
+  sits in parens (e.g. `(VIPIN KUMAR)`, `(McDonalds Hardcastle Restaurants)`)
+  and is currently never captured.
+- **NEW, confirmed — UPI handle whitelist gap.** `extractUpiId` (`parser.ts:152-182`)
+  doesn't recognize `@yesbankltd` (seen in a real sample) — no substring in
+  the whitelist matches it, so a legitimate UPI ID is silently dropped.
+- Amount extraction (`parser.ts:282`, `amounts[0]`) verified correct for real
+  UPI debit alerts — exactly one `Rs.X.XX` per email in all 3 samples, no
+  balance-vs-debited ambiguity for this alert type. Lower priority than
+  originally assumed; keep as defensive hardening only, not urgent.
 - `processGmailImport` (`src/lib/ingestion.ts:73,80`): `MAX_PAGES = 3`, query
   capped to `after:1-day` — never backfills.
 - `processIncrementalSync` (`src/lib/ingestion.ts:144-233`): no catch around
@@ -58,9 +88,11 @@ and subscription auto-detection.
 ### Implementation Details
 
 **1. Sync correctness**
-- Confirm real HDFC sender address against a live alert email's raw headers.
-  Fix `KNOWN_FINANCIAL_DOMAINS` and the Gmail search query to match; keep them
-  in one shared constant instead of duplicated across two files.
+- Sender confirmed (`alerts@hdfcbank.bank.in`) already matches both the Gmail
+  search query and `KNOWN_FINANCIAL_DOMAINS` — no fix needed. Add a
+  regression test asserting the query string and domain list stay in sync
+  (single shared constant instead of duplicated across two files, so this
+  can't silently drift again).
 - Replace hardcoded `MAX_PAGES`/`after:1-day` with `SYNC_LOOKBACK_DAYS` env var
   (default 180) for the first-ever full sync; subsequent full-imports (used as
   incremental-sync fallback) query only since `lastSyncAt`.
@@ -77,14 +109,33 @@ and subscription auto-detection.
   actually returns a non-empty one; never null out an existing valid refresh
   token.
 
-**2. Parsing correctness**
-- Amount extraction: when multiple amounts are found, prefer the one nearest a
-  debit/credit keyword ("debited", "credited", "spent") over "available
-  balance"/"limit" phrasing; add an explicit negative-keyword filter for
-  balance-related amounts.
-- Merchant extraction: expand phrasings based on real HDFC alert templates
-  (need 2-3 real anonymized sample emails from the user to calibrate before
-  implementation).
+**2. Parsing correctness (calibrated against 3 real HDFC UPI debit alerts)**
+- **Reference/UTR extraction fix (highest priority):** rewrite the
+  `ref(erence)?|txn|transaction` pattern in `extractReferences` so the
+  optional filler word ("reference", "no.") between the trigger keyword and
+  the actual digits doesn't get captured instead of the number. Target: for
+  `"UPI transaction reference no.: 489172985779"`, capture `489172985779`,
+  not `"reference"`. Add a dedicated pattern for `"UPI transaction reference
+  no.:? ([0-9]{6,})"` specifically, ahead of the generic one. Add a unit test
+  using the exact real string above as a regression guard.
+- **Date extraction fix:** add a DD-MM-YY (2-digit year) pattern to
+  `extractDates` (`"on 26-09-26"` format), assuming 20XX. Add a unit test
+  using the exact real date string as a regression guard.
+- **Merchant extraction fix:** add a dedicated pattern for
+  `"towards VPA [\w.@-]+\s*\(([^)]+)\)"` — the parenthesized name after the
+  VPA/UPI ID — ahead of the generic patterns, since it's the most reliable
+  signal for real HDFC UPI alerts. Verified against `(VIPIN KUMAR)`,
+  `(SIDDEGOWDA H C)`, `(McDonalds Hardcastle Restaurants)`.
+- **UPI handle whitelist fix:** add `yesbankltd` (confirmed real handle) to
+  `extractUpiId`'s whitelist. Note for future: this whitelist will keep
+  needing updates as new UPI handles appear — acceptable given HDFC-only,
+  solo-user scope; not solving generally in this pass.
+- Amount extraction: verified working correctly for real UPI debit alerts
+  (single amount per email, no ambiguity in the 3 samples checked). Add a
+  defensive fix anyway (prefer amount nearest debit/credit keyword over
+  "available balance" phrasing) since other HDFC alert types (statements,
+  card alerts) may include multiple amounts — lower priority, do after the
+  three fixes above.
 - Confidence: keep existing scoring math, but surface the reasons (which
   signals fired) into `ReviewItem.suggestedAction` JSON so the review UI can
   show why a transaction was flagged.
