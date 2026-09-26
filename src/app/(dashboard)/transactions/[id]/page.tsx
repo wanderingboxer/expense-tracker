@@ -61,6 +61,7 @@ type ApiTransaction = {
   categoryId: string | null;
   accountLast4: string | null;
   cardLast4: string | null;
+  merchantId: string | null;
   merchant: { id: string; name: string } | null;
   category: { id: string; name: string } | null;
   financialAccount?: { id: string; name: string; accountLast4?: string } | null;
@@ -118,12 +119,28 @@ export default function TransactionDetailPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
 
+  const [merchantEditOpen, setMerchantEditOpen] = useState(false);
+  const [merchantMode, setMerchantMode] = useState<"rename" | "reassign">("rename");
+  const [merchantNameInput, setMerchantNameInput] = useState("");
+  const [reassignInput, setReassignInput] = useState("");
+  const [applyToAllPast, setApplyToAllPast] = useState(true);
+  const [merchantOptions, setMerchantOptions] = useState<{ id: string; name: string }[]>([]);
+  const [merchantSaving, setMerchantSaving] = useState(false);
+
   useEffect(() => {
     fetch("/api/categories")
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => setCategories(Array.isArray(data) ? data : []))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!merchantEditOpen) return;
+    fetch("/api/merchants")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setMerchantOptions(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, [merchantEditOpen]);
 
   useEffect(() => {
     fetch(`/api/transactions/${params.id}`)
@@ -147,6 +164,58 @@ export default function TransactionDetailPage() {
       throw new Error(err.error ? JSON.stringify(err.error) : "Update failed");
     }
     return res.json();
+  }
+
+  async function saveMerchantEdit() {
+    if (!tx?.merchant) return;
+    setMerchantSaving(true);
+    try {
+      if (merchantMode === "rename") {
+        const name = merchantNameInput.trim();
+        if (!name) throw new Error("Enter a name");
+        const res = await fetch(`/api/merchants/${tx.merchant.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        if (!res.ok) throw new Error("Failed to rename merchant");
+        const refreshed = await fetch(`/api/transactions/${params.id}`).then((r) => r.json());
+        setTx(refreshed);
+      } else {
+        const target = merchantOptions.find(
+          (m) => m.name.toLowerCase() === reassignInput.trim().toLowerCase()
+        );
+        const body = target
+          ? {
+              sourceMerchantId: tx.merchant.id,
+              targetMerchantId: target.id,
+              applyToAllPastTransactions: applyToAllPast,
+            }
+          : {
+              sourceMerchantId: tx.merchant.id,
+              newMerchantName: reassignInput.trim(),
+              applyToAllPastTransactions: applyToAllPast,
+            };
+        if (!reassignInput.trim()) throw new Error("Enter a merchant name");
+
+        const res = await fetch("/api/merchants/merge-and-alias", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error ? JSON.stringify(err.error) : "Failed to reassign merchant");
+        }
+        const refreshed = await fetch(`/api/transactions/${params.id}`).then((r) => r.json());
+        setTx(refreshed);
+      }
+      setMerchantEditOpen(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to save merchant");
+    } finally {
+      setMerchantSaving(false);
+    }
   }
 
   async function handleAction(actionKey: string, action: () => Promise<void>) {
@@ -354,6 +423,22 @@ export default function TransactionDetailPage() {
               <Edit2 className="w-4 h-4 mr-2" />
               Edit Category
             </Button>
+            {tx.merchant && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setMerchantMode("rename");
+                  setMerchantNameInput(tx.merchant!.name);
+                  setReassignInput("");
+                  setApplyToAllPast(true);
+                  setMerchantEditOpen(true);
+                }}
+              >
+                <Building2 className="w-4 h-4 mr-2" />
+                Edit Merchant
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -513,6 +598,92 @@ export default function TransactionDetailPage() {
               }}
             >
               Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Merchant edit dialog */}
+      <Dialog open={merchantEditOpen} onOpenChange={setMerchantEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Merchant</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant={merchantMode === "rename" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setMerchantMode("rename")}
+              >
+                Rename this merchant
+              </Button>
+              <Button
+                type="button"
+                variant={merchantMode === "reassign" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setMerchantMode("reassign")}
+              >
+                Reassign to a different merchant
+              </Button>
+            </div>
+
+            {merchantMode === "rename" ? (
+              <div>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">
+                  New name
+                </label>
+                <Input
+                  value={merchantNameInput}
+                  onChange={(e) => setMerchantNameInput(e.target.value)}
+                  placeholder="e.g. Uber"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Renames the merchant everywhere it&apos;s used. Doesn&apos;t change how future
+                  emails are matched to it.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">
+                    Merchant name (existing or new)
+                  </label>
+                  <Input
+                    list="merchant-options"
+                    value={reassignInput}
+                    onChange={(e) => setReassignInput(e.target.value)}
+                    placeholder="Type an existing merchant or a new name"
+                  />
+                  <datalist id="merchant-options">
+                    {merchantOptions.map((m) => (
+                      <option key={m.id} value={m.name} />
+                    ))}
+                  </datalist>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Matches an existing merchant by exact name, otherwise creates a new one. Future
+                    emails from &quot;{tx.merchant?.name}&quot; will route here automatically.
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={applyToAllPast}
+                    onChange={(e) => setApplyToAllPast(e.target.checked)}
+                    className="rounded border-gray-300"
+                  />
+                  Apply to all past transactions from &quot;{tx.merchant?.name}&quot;
+                </label>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMerchantEditOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={saveMerchantEdit} disabled={merchantSaving}>
+              {merchantSaving ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>
