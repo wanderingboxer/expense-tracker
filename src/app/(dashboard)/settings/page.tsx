@@ -16,6 +16,7 @@ import {
   CreditCard,
   XCircle,
   Loader2,
+  RotateCcw,
 } from "lucide-react";
 import {
   Dialog,
@@ -177,6 +178,31 @@ function GmailSection({ email }: { email?: string | null }) {
     }
   };
 
+  const handleReset = async () => {
+    if (
+      !confirm(
+        "Reset all synced data? This permanently deletes every transaction, review item, and imported email, then starts the next sync from scratch. This cannot be undone."
+      )
+    )
+      return;
+    setActionLoading("reset");
+    setError(null);
+    setSyncResult(null);
+    try {
+      const res = await fetch("/api/gmail/sync", { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Reset failed");
+      }
+      setSyncResult("All synced data cleared. Run Sync Now to re-import from scratch.");
+      await fetchStatus();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Reset failed");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const formatLastSync = (dateStr: string | null | undefined) => {
     if (!dateStr) return "Never";
     const d = new Date(dateStr);
@@ -258,6 +284,15 @@ function GmailSection({ email }: { email?: string | null }) {
                 variant="danger"
                 onClick={handleDisconnect}
                 disabled={actionLoading === "disconnect"}
+              />
+            )}
+            {status?.connected && (
+              <ActionButton
+                icon={actionLoading === "reset" ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                label="Reset Sync Data"
+                variant="danger"
+                onClick={handleReset}
+                disabled={actionLoading === "reset" || syncing}
               />
             )}
           </div>

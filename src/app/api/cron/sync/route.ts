@@ -6,6 +6,10 @@ import {
   SyncInProgressError,
 } from "@/lib/ingestion";
 
+// Same reasoning as /api/gmail/sync: a Gmail API round trip per message, and
+// this route loops over every connected account in one request.
+export const maxDuration = 60;
+
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {

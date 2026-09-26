@@ -7,6 +7,12 @@ import {
   SyncInProgressError,
 } from "@/lib/ingestion";
 
+// Syncing makes a Gmail API round trip per message; the platform default
+// (10s on Vercel Hobby) is nowhere near enough for a real batch, and a
+// function killed at the timeout can't run its own cleanup code — leaving
+// the sync lock stuck. Raise the ceiling (60s is the Hobby-plan max).
+export const maxDuration = 60;
+
 export async function POST() {
   try {
     const session = await auth();

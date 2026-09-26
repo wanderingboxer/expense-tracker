@@ -164,6 +164,28 @@ describe("ingestion.ts sync orchestration (mocked Gmail client, real database)",
     expect(searchFinancialEmails).not.toHaveBeenCalled();
   });
 
+  it("reclaims a SYNCING lock left behind by a killed invocation instead of blocking forever", async () => {
+    // A serverless function killed at its execution-time limit never runs
+    // its own cleanup code, so syncStatus can get stuck at SYNCING with no
+    // process left to release it. A lock this old must be treated as
+    // abandoned, not as a sync genuinely still in progress.
+    const elevenMinutesAgo = new Date(Date.now() - 11 * 60 * 1000);
+    await prisma.gmailConnection.update({
+      where: { id: connectionId },
+      data: { syncStatus: "SYNCING", updatedAt: elevenMinutesAgo },
+    });
+
+    (searchFinancialEmails as jest.Mock).mockResolvedValue({
+      messageIds: [],
+      nextPageToken: undefined,
+    });
+
+    await expect(processGmailImport(userId)).resolves.toBeDefined();
+
+    const connection = await prisma.gmailConnection.findUnique({ where: { id: connectionId } });
+    expect(connection?.syncStatus).toBe("IDLE");
+  });
+
   it("falls back to a bounded full resync when Gmail reports history expired", async () => {
     await prisma.gmailConnection.update({
       where: { id: connectionId },

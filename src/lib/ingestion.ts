@@ -76,19 +76,38 @@ export class SyncInProgressError extends Error {
 const DEFAULT_LOOKBACK_DAYS = 180;
 // Bounds how many pages a single invocation processes, so a Vercel-timeout
 // limited run yields control (saving resume state) instead of restarting
-// from scratch next time.
-const MAX_PAGES_PER_RUN = 5;
+// from scratch next time. Each message costs its own Gmail API round trip
+// (getMessage) plus DB writes, so even 100 messages (1 page) can approach
+// a 60s budget — kept low deliberately; the resume mechanism picks up the
+// rest across however many invocations it takes.
+const MAX_PAGES_PER_RUN = 1;
 
 interface ResumeState {
   query: string;
   pageToken?: string;
 }
 
+// If a serverless function is killed mid-request (hits its platform
+// execution-time limit), no application code runs afterward — including
+// whatever would normally release the lock — so syncStatus can get stuck
+// at SYNCING forever, permanently rejecting every future sync attempt.
+// Treat a SYNCING lock older than this as abandoned and reclaimable.
+const STALE_LOCK_MINUTES = 10;
+
 /** Atomically claims the sync lock. Returns false if another run already
- * holds it (`syncStatus === SYNCING`), so callers never run concurrently. */
+ * holds it (`syncStatus === SYNCING` and recently updated), so callers
+ * never run concurrently — but a lock left behind by a killed/crashed
+ * invocation doesn't block sync forever. */
 async function acquireSyncLock(connectionId: string): Promise<boolean> {
+  const staleBefore = new Date(Date.now() - STALE_LOCK_MINUTES * 60 * 1000);
   const result = await prisma.gmailConnection.updateMany({
-    where: { id: connectionId, syncStatus: { not: SyncStatus.SYNCING } },
+    where: {
+      id: connectionId,
+      OR: [
+        { syncStatus: { not: SyncStatus.SYNCING } },
+        { syncStatus: SyncStatus.SYNCING, updatedAt: { lt: staleBefore } },
+      ],
+    },
     data: { syncStatus: SyncStatus.SYNCING, errorMessage: null },
   });
   return result.count > 0;
