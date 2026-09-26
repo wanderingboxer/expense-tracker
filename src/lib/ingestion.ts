@@ -49,6 +49,13 @@ interface ImportStats {
   failedMessages: number;
   firstErrorMessage?: string;
   partial: boolean;
+  // Debug fields to diagnose a real production bug where a sync completed
+  // (partial: false) after scanning far fewer messages than actually match
+  // the search query in Gmail itself — pagesFetched/gmailReportedMore make
+  // it possible to tell, from the API response alone, whether Gmail's own
+  // nextPageToken was genuinely absent or something else cut the run short.
+  pagesFetched: number;
+  gmailReportedMore: boolean;
 }
 
 function emptyStats(): ImportStats {
@@ -60,6 +67,8 @@ function emptyStats(): ImportStats {
     reviewItems: 0,
     failedMessages: 0,
     partial: false,
+    pagesFetched: 0,
+    gmailReportedMore: false,
   };
 }
 
@@ -142,6 +151,12 @@ async function runPagedImport(
       query,
       pageToken,
       MESSAGES_PAGE_SIZE
+    );
+    stats.pagesFetched++;
+    stats.gmailReportedMore = Boolean(nextPageToken);
+    console.log(
+      `[sync] page ${stats.pagesFetched}: query="${query}" pageToken=${pageToken ?? "(none)"} ` +
+        `got ${messageIds.length} messageIds, nextPageToken=${nextPageToken ?? "(none)"}`
     );
 
     let ranOutOfTime = false;

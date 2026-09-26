@@ -40,6 +40,8 @@ interface ImportStats {
   candidatesCreated: number;
   duplicatesMerged: number;
   partial: boolean;
+  pagesFetched: number;
+  gmailReportedMore: boolean;
 }
 
 interface Category {
@@ -144,9 +146,9 @@ function GmailSection({ email }: { email?: string | null }) {
       }
       const s = data.stats!;
       setSyncResult(
-        `Scanned ${s.totalScanned} emails, found ${s.financialFound} financial, created ${s.candidatesCreated} transactions, merged ${s.duplicatesMerged} duplicates${
+        `Scanned ${s.totalScanned} emails across ${s.pagesFetched} page(s), found ${s.financialFound} financial, created ${s.candidatesCreated} transactions, merged ${s.duplicatesMerged} duplicates${
           s.partial ? " — more remain, click Sync Now again to continue" : ""
-        }`
+        } (Gmail reported ${s.gmailReportedMore ? "more results available" : "no more results"})`
       );
       await fetchStatus();
     } catch (e) {
