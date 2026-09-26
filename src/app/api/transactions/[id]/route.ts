@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { TransactionType, PaymentMethod } from "@/generated/prisma/enums";
+import { learnFromUserChoice } from "@/lib/categorizer";
 
 const updateSchema = z.object({
   amount: z.number().positive().optional(),
@@ -70,6 +71,19 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       data,
       include: { merchant: true, category: true },
     });
+
+    // Learn from a manual category correction so future transactions from
+    // the same merchant get categorized correctly automatically.
+    const finalMerchantId = transaction.merchantId;
+    const categoryChanged =
+      "categoryId" in data && data.categoryId !== existing.categoryId;
+    if (categoryChanged && transaction.categoryId && finalMerchantId) {
+      await learnFromUserChoice(
+        session.user.id,
+        finalMerchantId,
+        transaction.categoryId
+      );
+    }
 
     return NextResponse.json(transaction);
   } catch (error) {
